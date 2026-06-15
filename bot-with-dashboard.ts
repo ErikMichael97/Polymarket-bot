@@ -1369,6 +1369,54 @@ async function main() {
         log('WARN', `❌ Redeem error: ${err.message}`);
       }
     }
+
+    if (command === 'updateConfig') {
+      const { key, value } = payload;
+
+      if (key === 'tradeSize' && typeof value === 'number') {
+        CONFIG.capital.maxPerTradePct = Math.max(0.005, Math.min(0.10, value));
+        log('INFO', `Trade size updated: ${(CONFIG.capital.maxPerTradePct * 100).toFixed(1)}% per trade`);
+      }
+
+      if (key === 'addWallet' && typeof value === 'string' && value.startsWith('0x') && value.length === 42) {
+        if (!(CONFIG.smartMoney.customWallets as string[]).includes(value)) {
+          (CONFIG.smartMoney.customWallets as string[]).push(value);
+          log('INFO', `Custom wallet added: ${value.slice(0, 10)}... — disable/re-enable Smart Money to apply`);
+        } else {
+          log('WARN', `Wallet already tracked: ${value.slice(0, 10)}...`);
+        }
+      }
+
+      if (key === 'removeWallet' && typeof value === 'string') {
+        (CONFIG.smartMoney as any).customWallets = (CONFIG.smartMoney.customWallets as string[]).filter(w => w !== value);
+        log('INFO', `Custom wallet removed: ${value.slice(0, 10)}...`);
+      }
+
+      if (key === 'takeProfit') {
+        (CONFIG as any).takeProfitEnabled = value.enabled;
+        (CONFIG as any).takeProfitPct = value.pct;
+        log('INFO', `Take-profit ${value.enabled ? `enabled at ${value.pct}%` : 'disabled'}`);
+      }
+
+      // Broadcast updated config
+      dashboardEmitter.updateConfig({
+        capital: CONFIG.capital,
+        risk: CONFIG.risk,
+        smartMoney: {
+          enabled: CONFIG.smartMoney.enabled,
+          topN: CONFIG.smartMoney.topN,
+          minWinRate: CONFIG.smartMoney.minWinRate,
+          minPnl: CONFIG.smartMoney.minPnl,
+          minTrades: CONFIG.smartMoney.minTrades,
+          customWallets: CONFIG.smartMoney.customWallets,
+        },
+        arbitrage: { enabled: CONFIG.arbitrage.enabled, profitThreshold: CONFIG.arbitrage.profitThreshold, autoExecute: CONFIG.arbitrage.autoExecute },
+        dipArb: { enabled: CONFIG.dipArb.enabled, coins: CONFIG.dipArb.coins },
+        directTrading: { enabled: CONFIG.directTrading.enabled },
+        binance: { enabled: CONFIG.binance.enabled },
+        dryRun: CONFIG.dryRun,
+      });
+    }
   });
 
   process.on('SIGINT', async () => {
