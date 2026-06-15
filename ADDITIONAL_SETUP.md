@@ -956,12 +956,127 @@ Push to your private GitHub repo. Railway auto-builds and starts the bot. Check 
 
 ---
 
+## VPS Deployment (DigitalOcean) — Use This Instead of Railway
+
+Railway's available regions (US East, US West, Amsterdam, Singapore) are all geo-blocked by Polymarket as of early 2025 — the Netherlands banned Polymarket in March 2025, and the US has been blocked since launch. Use a DigitalOcean droplet in Frankfurt or London instead.
+
+**Why DigitalOcean over Railway here:**
+Railway doesn't offer Frankfurt or London regions. DigitalOcean does. Frankfurt (Germany) and London (UK) are both Polymarket-accessible. Cost is similar (~$6/month).
+
+### Setup
+
+**1. Create a droplet**
+
+- Go to cloud.digitalocean.com → Create → Droplets
+- **Region:** Frankfurt (fra1) or London (lon1)
+- **OS:** Ubuntu 24.04 LTS
+- **Plan:** Basic → Regular → $6/month (1 vCPU, 1GB RAM, 25GB SSD) — sufficient for the bot
+- **Authentication:** SSH key (add your public key) or password
+- Create the droplet, note the IP address
+
+**2. SSH in and install Node.js**
+
+```bash
+ssh root@YOUR_DROPLET_IP
+
+# Install Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+apt-get install -y nodejs
+
+# Install PM2 (process manager — keeps bot running after reboots)
+npm install -g pm2
+
+# Verify
+node --version   # should be v20.x
+npm --version
+```
+
+**3. Clone your repo and install dependencies**
+
+```bash
+cd /root
+git clone https://github.com/ErikMichael97/Polymarket-bot.git
+cd Polymarket-bot
+
+npm install
+
+cd dashboard
+npm install
+npm run build
+cd ..
+```
+
+**4. Create your .env file on the droplet**
+
+```bash
+nano .env
+```
+
+Paste your full `.env` contents (private key, capital, DRY_RUN=true, etc.), save with Ctrl+X → Y → Enter.
+
+**5. Open port 3001 in the firewall**
+
+```bash
+ufw allow 3001
+ufw allow OpenSSH
+ufw enable
+```
+
+**6. Start the bot with PM2**
+
+```bash
+pm2 start "npx tsx bot-with-dashboard.ts" --name sentinel-bot
+pm2 save
+pm2 startup   # run the command it prints to auto-start on reboot
+```
+
+**7. Check it's running**
+
+```bash
+pm2 logs sentinel-bot    # live log stream
+pm2 status               # should show 'online'
+```
+
+Dashboard is now at `http://YOUR_DROPLET_IP:3001` — accessible from anywhere.
+
+**8. Add the droplet IP to Vercel**
+
+In Vercel → sentinal project → Settings → Environment Variables:
+- Key: `NEXT_PUBLIC_BOT_URL`
+- Value: `http://YOUR_DROPLET_IP:3001`
+
+Redeploy Vercel. The sentinalmarkets.com/bot page will connect to the droplet.
+
+> **Note on HTTPS:** The dashboard URL above is plain HTTP. For production (Phase 2+), set up nginx as a reverse proxy with a free Let's Encrypt SSL cert so the WebSocket connection is `wss://` instead of `ws://`. Not required for dry run but browsers may warn about mixed content when connecting from your HTTPS Vercel site. If you hit that issue, ping me and we'll add nginx.
+
+### Useful PM2 commands
+
+```bash
+pm2 restart sentinel-bot   # restart after code changes
+pm2 stop sentinel-bot      # pause the bot
+pm2 logs sentinel-bot      # tail live logs
+pm2 status                 # health overview
+```
+
+### Updating the bot
+
+When you push changes to GitHub, pull them on the droplet and restart:
+
+```bash
+cd /root/Polymarket-bot
+git pull
+cd dashboard && npm run build && cd ..
+pm2 restart sentinel-bot
+```
+
+---
+
 ## Phase 1 Checklist
 
 Before moving to Phase 2 (real money) all of these should be true:
 
-- [ ] Bot runs 24/7 on Railway without crashing
-- [ ] Dashboard accessible at Railway URL
+- [ ] Bot runs 24/7 on DigitalOcean droplet without crashing
+- [ ] Dashboard accessible at droplet IP:3001
 - [ ] Daily digest email arriving every morning
 - [ ] 100 trades completed (milestone email received)
 - [ ] Win rate above 50% in dry run
