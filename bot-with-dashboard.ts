@@ -22,7 +22,7 @@ import { CTFClient } from './src/clients/ctf-client.js';
 import { startDashboard, dashboardEmitter } from './src/dashboard/index.js';
 import type { BotState, BotConfig, LogLevel, DipArbSignal, SmartMoneySignal } from './src/dashboard/types.js';
 import { addSession, createSessionFromState, type TradeRecord } from './src/dashboard/session-history.js';
-import { isOrderSlice } from './src/slice-detector.js';
+import { isOrderSlice, isWalletRateLimited } from './src/slice-detector.js';
 import { sendDailyDigest } from './src/digest.js';
 import { checkTradeMilestone, isMilestonePaused } from './src/milestone.js';
 import { loadRuntimeConfig, saveRuntimeConfig } from './src/config-store.js';
@@ -443,6 +443,11 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
 
         // Deduplicate order slices — top wallets split positions into many fills
         if (isOrderSlice(trade.traderAddress, trade.marketSlug || trade.conditionId || 'unknown')) {
+          return;
+        }
+
+        // Per-wallet hourly rate limit (default 10 copies/hr, set WALLET_HOURLY_LIMIT in .env)
+        if (isWalletRateLimited(trade.traderAddress)) {
           return;
         }
 
