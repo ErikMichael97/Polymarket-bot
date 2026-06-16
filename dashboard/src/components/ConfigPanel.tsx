@@ -101,7 +101,7 @@ export function ConfigPanel({ config }: ConfigPanelProps) {
               Risk Management
             </div>
             <div className="bg-poly-dark/50 rounded-xl p-4 space-y-1 divide-y divide-white/5">
-              <ConfigItem label="Daily Max Loss" value={`${config.risk?.dailyMaxLossPct ?? 10}%`} />
+              <ConfigItem label="Daily Max Loss" value={`${((config.risk?.dailyMaxLossPct ?? 0.05) * 100).toFixed(0)}%`} />
               <ConfigItem label="Max Consecutive Losses" value={config.risk?.maxConsecutiveLosses ?? 6} type="number" />
               <ConfigItem label="Pause Duration" value={`${config.risk?.pauseOnBreachMinutes ?? 30}m`} />
             </div>
