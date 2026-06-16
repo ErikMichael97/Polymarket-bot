@@ -22,7 +22,7 @@ function BalanceCard({ icon, label, value, subLabel, gradient, iconBg }: Balance
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</div>
-          <div className="text-lg font-bold font-mono text-white truncate">
+          <div className="text-base font-bold font-mono text-white leading-tight break-all">
             {value}
           </div>
         </div>
