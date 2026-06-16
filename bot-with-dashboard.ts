@@ -477,8 +477,10 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
 
         // EXECUTION LOGIC
         if (CONFIG.dryRun) {
-          // ... execution
-          simulateTrade(0, 'smartMoney', `Smart Money Copy: ${trade.side} ${trade.size} shares @ ${trade.price}`);
+          // Entry cost = shares × price (USDC spent). Balance decreases on entry;
+          // in a real resolution it would increase by `size` on win or 0 on loss.
+          const entryCost = -(trade.size * trade.price);
+          simulateTrade(entryCost, 'smartMoney', `Smart Money Copy: ${trade.side} ${trade.size} shares @ ${trade.price}`);
         } else {
           // ... live execution
           // simplified placeholder from original file

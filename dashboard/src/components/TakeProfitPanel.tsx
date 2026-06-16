@@ -9,7 +9,11 @@ interface TakeProfitPanelProps {
 export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps) {
   const [targetPct, setTargetPct] = useState<number>(config?.takeProfit?.targetPct ?? 20);
   const [enabled, setEnabled] = useState<boolean>(config?.takeProfit?.enabled ?? true);
+  const [tradeSize, setTradeSize] = useState<number>(
+    Math.round((config?.capital?.maxPerTradePct ?? 0.02) * 100)
+  );
   const botPaused = config?.botPaused ?? false;
+  const capital = config?.capital?.totalUsd ?? 1000;
 
   const handleToggle = () => {
     const newEnabled = !enabled;
@@ -21,6 +25,12 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
     const pct = parseInt(e.target.value);
     setTargetPct(pct);
     onUpdateConfig('takeProfit', { enabled, pct });
+  };
+
+  const handleTradeSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const pct = parseFloat(e.target.value);
+    setTradeSize(pct);
+    onUpdateConfig('tradeSize', pct / 100);
   };
 
   const handleResume = () => {
@@ -58,24 +68,50 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
           </div>
         )}
 
-        <div className={enabled ? '' : 'opacity-40 pointer-events-none'}>
+        {/* Trade Size Slider */}
+        <div>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-gray-400 text-sm">Target return</span>
-            <span className="text-white font-mono font-medium">+{targetPct}%</span>
+            <span className="text-gray-400 text-sm">Trade size</span>
+            <span className="text-white font-mono font-medium">
+              {tradeSize}% <span className="text-gray-500 text-xs">(${(capital * tradeSize / 100).toFixed(2)})</span>
+            </span>
           </div>
           <input
             type="range"
-            min="5"
-            max="100"
-            step="5"
-            value={targetPct}
-            onChange={handleSliderChange}
-            className="w-full accent-green-500"
+            min="0.5"
+            max="5"
+            step="0.5"
+            value={tradeSize}
+            onChange={handleTradeSizeChange}
+            className="w-full accent-blue-500"
           />
           <div className="flex justify-between text-xs text-gray-600 mt-1">
-            <span>5% (quick exit)</span>
-            <span>50%</span>
-            <span>100% (hold)</span>
+            <span>0.5%</span>
+            <span>2.5%</span>
+            <span>5%</span>
+          </div>
+        </div>
+
+        <div className="border-t border-white/5 pt-3">
+          <div className={enabled ? '' : 'opacity-40 pointer-events-none'}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-400 text-sm">Target return</span>
+              <span className="text-white font-mono font-medium">+{targetPct}%</span>
+            </div>
+            <input
+              type="range"
+              min="5"
+              max="100"
+              step="5"
+              value={targetPct}
+              onChange={handleSliderChange}
+              className="w-full accent-green-500"
+            />
+            <div className="flex justify-between text-xs text-gray-600 mt-1">
+              <span>5% (quick exit)</span>
+              <span>50%</span>
+              <span>100% (hold)</span>
+            </div>
           </div>
         </div>
 
