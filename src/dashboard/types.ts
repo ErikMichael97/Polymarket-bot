@@ -156,6 +156,11 @@ export interface BotConfig {
     enabled: boolean;
   };
   dryRun: boolean;
+  takeProfit?: {
+    enabled: boolean;
+    targetPct: number;
+  };
+  botPaused?: boolean;
 }
 
 export type LogLevel =

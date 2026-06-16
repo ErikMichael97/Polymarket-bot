@@ -20,6 +20,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
 
+function checkBasicAuth(req: http.IncomingMessage): boolean {
+  if (!process.env.DASHBOARD_PASSWORD) return true;
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Basic ')) return false;
+  const [username, password] = Buffer.from(authHeader.slice(6), 'base64').toString().split(':');
+  return username === 'admin' && password === process.env.DASHBOARD_PASSWORD;
+}
+
 function broadcast(message: WebSocketMessage): void {
   if (!wss) return;
   const data = JSON.stringify(message);
@@ -40,6 +48,15 @@ export function startDashboard(port = parseInt(process.env.PORT || '3001', 10)):
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    if (!checkBasicAuth(req)) {
+      res.writeHead(401, {
+        'WWW-Authenticate': 'Basic realm="Sentinel Bot"',
+        'Content-Type': 'text/plain',
+      });
+      res.end('Unauthorized');
       return;
     }
 

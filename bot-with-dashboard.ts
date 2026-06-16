@@ -10,6 +10,7 @@
 
 import 'dotenv/config';
 import { ethers } from 'ethers';
+import cron from 'node-cron';
 import {
   PolymarketSDK,
   ArbitrageService,
@@ -21,6 +22,10 @@ import { CTFClient } from './src/clients/ctf-client.js';
 import { startDashboard, dashboardEmitter } from './src/dashboard/index.js';
 import type { BotState, BotConfig, LogLevel, DipArbSignal, SmartMoneySignal } from './src/dashboard/types.js';
 import { addSession, createSessionFromState, type TradeRecord } from './src/dashboard/session-history.js';
+import { isOrderSlice } from './src/slice-detector.js';
+import { sendDailyDigest } from './src/digest.js';
+import { checkTradeMilestone, isMilestonePaused } from './src/milestone.js';
+import { loadRuntimeConfig, saveRuntimeConfig } from './src/config-store.js';
 
 // ============================================================================
 // CONFIGURATION (same as bot-config.ts)
@@ -233,6 +238,12 @@ function updateDashboard() {
 
 // 🔴 FIXED: v3.1 Multi-layer risk management
 function canTrade(): boolean {
+  // Check milestone pause (from config store, persists across restarts)
+  if (isMilestonePaused()) {
+    log('WARN', `Bot paused at trade milestone — resume via dashboard`);
+    return false;
+  }
+
   // Check if permanently halted
   if (state.permanentlyHalted) {
     log('ERROR', '🛑 Trading permanently halted - total loss limit reached');
@@ -334,6 +345,15 @@ function recordTrade(profit: number, strategy: string) {
   else if (strategy === 'direct') state.directTrades++;
 
   updateDashboard();
+
+  // Check milestone — fire and forget
+  checkTradeMilestone({
+    tradesExecuted: state.tradesExecuted,
+    totalPnL: state.totalPnL,
+    startBalance: CONFIG.capital.totalUsd,
+    currentBalance: CONFIG.capital.totalUsd + state.totalPnL,
+    dryRun: CONFIG.dryRun,
+  }).catch((err) => log('WARN', `Milestone check error: ${err.message}`));
 }
 
 function simulateTrade(profit: number, strategy: string, description: string) {
@@ -420,6 +440,11 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
       async (trade: SmartMoneyTrade) => {
         if (!CONFIG.smartMoney.enabled) return;
         if (!canTrade()) return;
+
+        // Deduplicate order slices — top wallets split positions into many fills
+        if (isOrderSlice(trade.traderAddress, trade.marketSlug || trade.conditionId || 'unknown')) {
+          return;
+        }
 
         // ... (inside setupSmartMoney callback)
         // Add to smart money signals for dashboard
@@ -1010,6 +1035,14 @@ async function main() {
   console.log('║          POLYMARKET BOT v3.0 + DASHBOARD                           ║');
   console.log('╚════════════════════════════════════════════════════════════════════╝\n');
 
+  // Load persisted runtime config (take-profit, pause state)
+  const runtimeConfig = loadRuntimeConfig();
+  (CONFIG as any).takeProfitEnabled = runtimeConfig.takeProfit.enabled;
+  (CONFIG as any).takeProfitPct = runtimeConfig.takeProfit.targetPct;
+  if (runtimeConfig.botPaused) {
+    log('WARN', `Bot starting in PAUSED state (milestone reached). Resume via dashboard.`);
+  }
+
   // Start Dashboard Server
   startDashboard(3001);
   console.log('\n🌐 Dashboard: http://localhost:3001\n');
@@ -1048,8 +1081,33 @@ async function main() {
     },
     dryRun: CONFIG.dryRun,
   };
-  dashboardEmitter.updateConfig(dashboardConfig);
+  dashboardEmitter.updateConfig({
+    ...dashboardConfig,
+    takeProfit: {
+      enabled: (CONFIG as any).takeProfitEnabled ?? true,
+      targetPct: (CONFIG as any).takeProfitPct ?? 20,
+    },
+    botPaused: runtimeConfig.botPaused,
+  });
   dashboardEmitter.updateState(state);
+
+  // Daily digest email
+  cron.schedule(`0 ${process.env.DIGEST_HOUR ?? '7'} * * *`, async () => {
+    try {
+      await sendDailyDigest({
+        currentBalance: CONFIG.capital.totalUsd + state.totalPnL,
+        startBalance: CONFIG.capital.totalUsd,
+        dailyPnL: state.dailyPnL,
+        totalPnL: state.totalPnL,
+        tradesExecuted: state.tradesExecuted,
+        followedWallets: state.followedWallets.length,
+        dryRun: CONFIG.dryRun,
+      });
+      log('INFO', 'Daily digest sent');
+    } catch (err: any) {
+      log('WARN', `Digest send failed: ${err.message}`);
+    }
+  }, { timezone: process.env.TZ || 'America/New_York' });
 
   log('INFO', 'Configuration', {
     binance: CONFIG.binance.enabled,
@@ -1396,6 +1454,14 @@ async function main() {
         (CONFIG as any).takeProfitEnabled = value.enabled;
         (CONFIG as any).takeProfitPct = value.pct;
         log('INFO', `Take-profit ${value.enabled ? `enabled at ${value.pct}%` : 'disabled'}`);
+        const current = loadRuntimeConfig();
+        saveRuntimeConfig({ ...current, takeProfit: { enabled: value.enabled, targetPct: value.pct, applyToStrategies: ['smartMoney'] } });
+      }
+
+      if (key === 'botPaused' && value === false) {
+        const current = loadRuntimeConfig();
+        saveRuntimeConfig({ ...current, botPaused: false });
+        log('INFO', '▶️ Bot resumed after milestone pause');
       }
 
       // Broadcast updated config
@@ -1415,6 +1481,11 @@ async function main() {
         directTrading: { enabled: CONFIG.directTrading.enabled },
         binance: { enabled: CONFIG.binance.enabled },
         dryRun: CONFIG.dryRun,
+        takeProfit: {
+          enabled: (CONFIG as any).takeProfitEnabled ?? true,
+          targetPct: (CONFIG as any).takeProfitPct ?? 20,
+        },
+        botPaused: loadRuntimeConfig().botPaused,
       });
     }
   });

@@ -18,6 +18,7 @@ import {
   HistoryPage,
   PositionsPage,
   StrategyControls,
+  TakeProfitPanel,
 } from './components';
 
 type Page = 'dashboard' | 'history' | 'positions';
@@ -37,6 +38,10 @@ function App() {
 
   const handleRedeemPosition = (conditionId: string) => {
     sendCommand('redeemPosition', { conditionId });
+  };
+
+  const handleUpdateConfig = (key: string, value: unknown) => {
+    sendCommand('updateConfig', { key, value });
   };
 
   const handleToggleDryRun = () => {
@@ -172,6 +177,7 @@ function App() {
           </div>
           <div className="space-y-3">
             <StrategyControls config={config} onToggle={handleToggleStrategy} />
+            <TakeProfitPanel config={config} onUpdateConfig={handleUpdateConfig} />
             <TrendIndicators state={state} />
             <StrategyGrid state={state} config={config} />
             <OnChainStats state={state} />
