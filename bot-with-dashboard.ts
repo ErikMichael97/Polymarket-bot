@@ -2038,6 +2038,8 @@ async function main() {
       state.currentCapital = CONFIG.capital.totalUsd;
       state.currentDrawdown = 0;
       state.paperPositions = [];
+      state.positions = [];
+      state.smartMoneySignals = [];
       if (state.paper) {
         state.paper = {
           balance: CONFIG.capital.totalUsd,
