@@ -541,6 +541,18 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
     log('WARN', `Leaderboard error: ${(err as Error).message}`);
   }
 
+  // Always keep wallets that have open positions, even if they've dropped off the leaderboard.
+  // Without this, their SELL signals would be ignored and positions would never close via signal.
+  const openPositionWallets = (state.paperPositions ?? [])
+    .filter(p => !p.resolved)
+    .map(p => p.wallet.toLowerCase());
+  for (const wallet of openPositionWallets) {
+    if (!qualified.some(q => q.toLowerCase() === wallet)) {
+      qualified.push(wallet);
+      log('WALLET', `📌 Retained ${wallet.slice(0, 10)}... — has open position, not on current leaderboard`);
+    }
+  }
+
   state.followedWallets = qualified;
   log('WALLET', `Following ${qualified.length} wallets`);
   updateDashboard();
@@ -575,19 +587,32 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
         }
         updateDashboard();
 
-        // SELL signals always execute (close existing positions and return capital to balance)
-        // canTrade() only gates new BUY entries
         const isSell = trade.side === 'SELL';
-        if (!isSell && !canTrade()) return;
+        const traderLower = trade.traderAddress.toLowerCase();
+        const isFollowedWallet = state.followedWallets.some(w => w.toLowerCase() === traderLower);
 
-        // Only copy if trade value meets the minimum threshold
-        if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
-
-        // Skip sub-5% probability bets — longshots skew P&L and are unreliable signals
-        // High-probability (>95%) trades are fine — following near-certainties is valid
-        if (trade.price < 0.05) {
-          log('SIGNAL', `Skipping longshot: ${trade.side} @ ${trade.price.toFixed(3)} (< 5% probability)`);
-          return;
+        if (!isSell) {
+          // BUY: only copy from wallets we're actively following
+          if (!isFollowedWallet) return;
+          if (!canTrade()) return;
+          if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
+          if (trade.price < 0.05) {
+            log('SIGNAL', `Skipping longshot: ${trade.side} @ ${trade.price.toFixed(3)} (< 5% probability)`);
+            return;
+          }
+        } else {
+          // SELL: only close positions opened by this same wallet
+          // No size filter — exits should always be honoured regardless of current value
+          const condId = (trade as any).conditionId as string | undefined;
+          const hasOurPosition = (state.paperPositions ?? []).some(
+            p => !p.resolved &&
+              p.wallet.toLowerCase() === traderLower &&
+              ((condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown'))
+          ) || state.positions.some(
+            (p: any) => !p.closed &&
+              ((condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown'))
+          );
+          if (!hasOurPosition) return;
         }
 
         log('SIGNAL', `COPY $${tradeValueUsd.toFixed(0)} — ${trade.side} from ${trade.traderAddress.slice(0, 10)}...`, {
@@ -601,14 +626,16 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
         if (CONFIG.dryRun) {
           if (!state.paperPositions) state.paperPositions = [];
 
-          // --- SELL: always process regardless of balance (closes position and returns capital) ---
+          // --- SELL: close the position opened by this specific wallet ---
           if (trade.side === 'SELL') {
             const condId = (trade as any).conditionId as string | undefined;
             const matchIdx = state.paperPositions.findIndex(
-              p => !p.resolved && (
-                (condId && p.conditionId === condId) ||
-                p.market === (trade.marketSlug || 'Unknown')
-              )
+              p => !p.resolved &&
+                p.wallet.toLowerCase() === traderLower &&
+                (
+                  (condId && p.conditionId === condId) ||
+                  p.market === (trade.marketSlug || 'Unknown')
+                )
             );
             if (matchIdx >= 0) {
               const pos = state.paperPositions[matchIdx];
