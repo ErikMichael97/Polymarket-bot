@@ -236,6 +236,7 @@ function log(level: LogLevel, message: string, data?: unknown) {
 }
 
 let _dashboardUpdatePending = false;
+let _lastFeedDiagMs = 0;
 function updateDashboard() {
   if (_dashboardUpdatePending) return;
   _dashboardUpdatePending = true;
@@ -581,6 +582,11 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           if (!isFollowedWallet) {
             if (state.followedWallets.length === 0) {
               log('WARN', `[WalletFilter] BUY dropped — followed wallet list is still empty (leaderboard still loading?)`);
+            }
+            // Diagnostic: periodically log large trades so we can verify addresses coming through the feed
+            if (tradeValueUsd >= 1000 && Date.now() - _lastFeedDiagMs > 30_000) {
+              _lastFeedDiagMs = Date.now();
+              log('SIGNAL', `[FeedDiag] Large BUY from non-followed wallet: ${traderLower.slice(0, 14)}... $${tradeValueUsd.toFixed(0)}`);
             }
             return;
           }
@@ -1486,12 +1492,21 @@ async function main() {
   console.log('║          POLYMARKET BOT v3.0 + DASHBOARD                           ║');
   console.log('╚════════════════════════════════════════════════════════════════════╝\n');
 
-  // Load persisted runtime config (take-profit, pause state)
+  // Load persisted runtime config (take-profit, pause state, custom wallets)
   const runtimeConfig = loadRuntimeConfig();
   (CONFIG as any).takeProfitEnabled = runtimeConfig.takeProfit.enabled;
   (CONFIG as any).takeProfitPct = runtimeConfig.takeProfit.targetPct;
   if (runtimeConfig.botPaused) {
     log('WARN', `Bot starting in PAUSED state (milestone reached). Resume via dashboard.`);
+  }
+  // Restore custom wallets saved from previous session
+  if (runtimeConfig.customWallets?.length > 0) {
+    for (const w of runtimeConfig.customWallets) {
+      if (!(CONFIG.smartMoney.customWallets as string[]).map(a => a.toLowerCase()).includes(w.toLowerCase())) {
+        (CONFIG.smartMoney.customWallets as string[]).push(w);
+      }
+    }
+    log('WALLET', `Restored ${runtimeConfig.customWallets.length} custom wallet(s) from last session`);
   }
 
   // Start Dashboard Server
@@ -1941,7 +1956,12 @@ async function main() {
           if (!state.followedWallets.map(w => w.toLowerCase()).includes(walletLower)) {
             state.followedWallets.push(value);
           }
-          log('WALLET', `⭐ Custom wallet added live: ${value.slice(0, 10)}...`);
+          // Persist so the wallet survives crashes/restarts
+          const rc = loadRuntimeConfig();
+          if (!rc.customWallets) rc.customWallets = [];
+          if (!rc.customWallets.map(w => w.toLowerCase()).includes(walletLower)) rc.customWallets.push(value);
+          saveRuntimeConfig(rc);
+          log('WALLET', `⭐ Custom wallet added: ${value.slice(0, 10)}...`);
           updateDashboard();
         } else {
           log('WARN', `Wallet already tracked: ${value.slice(0, 10)}...`);
@@ -1952,6 +1972,10 @@ async function main() {
         const walletLower = value.toLowerCase();
         (CONFIG.smartMoney as any).customWallets = (CONFIG.smartMoney.customWallets as string[]).filter(w => w.toLowerCase() !== walletLower);
         state.followedWallets = state.followedWallets.filter(w => w.toLowerCase() !== walletLower);
+        // Remove from persisted config too
+        const rc = loadRuntimeConfig();
+        rc.customWallets = (rc.customWallets ?? []).filter(w => w.toLowerCase() !== walletLower);
+        saveRuntimeConfig(rc);
         log('WALLET', `🗑️ Custom wallet removed: ${value.slice(0, 10)}...`);
         updateDashboard();
       }

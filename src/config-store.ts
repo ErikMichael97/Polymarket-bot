@@ -15,11 +15,13 @@ export interface RuntimeConfig {
     applyToStrategies: string[];
   };
   botPaused: boolean;
+  customWallets: string[];
 }
 
 const DEFAULT_CONFIG: RuntimeConfig = {
   takeProfit: { enabled: true, targetPct: 20, applyToStrategies: ['smartMoney'] },
   botPaused: false,
+  customWallets: [],
 };
 
 // In-memory cache — updated immediately on save so canTrade() sees changes without file I/O
