@@ -237,8 +237,14 @@ function log(level: LogLevel, message: string, data?: unknown) {
   dashboardEmitter.log(level, message, data);
 }
 
+let _dashboardUpdatePending = false;
 function updateDashboard() {
-  dashboardEmitter.updateState(state);
+  if (_dashboardUpdatePending) return;
+  _dashboardUpdatePending = true;
+  setTimeout(() => {
+    dashboardEmitter.updateState(state);
+    _dashboardUpdatePending = false;
+  }, 500);
 }
 
 function broadcastConfig() {
