@@ -488,9 +488,9 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
         if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
 
         // Skip sub-5% probability bets — longshots skew P&L and are unreliable signals
-        const MIN_ENTRY_PRICE = 0.05;
-        if (trade.price < MIN_ENTRY_PRICE || trade.price > (1 - MIN_ENTRY_PRICE)) {
-          log('SIGNAL', `Skipping longshot: ${trade.side} @ ${trade.price.toFixed(3)} (outside 5%-95% range)`);
+        // High-probability (>95%) trades are fine — following near-certainties is valid
+        if (trade.price < 0.05) {
+          log('SIGNAL', `Skipping longshot: ${trade.side} @ ${trade.price.toFixed(3)} (< 5% probability)`);
           return;
         }
 
