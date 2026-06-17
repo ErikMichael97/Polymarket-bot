@@ -87,10 +87,7 @@ let CONFIG = {
     maxSlippage: 0.03,
     minTradeSize: 10,  // Up from 5
     delay: 500,
-    customWallets: [
-      '0xc2e7800b5af46e6093872b177b7a5e7f0563be51',
-      '0x58c3f5d66c95d4c41b093fbdd2520e46b6c9de74',
-    ] as string[],
+    customWallets: [] as string[],
   },
 
   arbitrage: {
@@ -572,21 +569,8 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
 
         const tradeValueUsd = trade.size * trade.price;
 
-        // Always log to the SmartMoney panel — even when paused, you can see wallet activity
-        const signal: SmartMoneySignal = {
-          id: `sm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          timestamp: new Date().toISOString(),
-          wallet: trade.traderAddress,
-          market: trade.marketSlug || 'Unknown',
-          side: trade.side as 'BUY' | 'SELL',
-          size: trade.size,
-          price: trade.price,
-        };
-        state.smartMoneySignals.unshift(signal);
-        if (state.smartMoneySignals.length > 50) {
-          state.smartMoneySignals = state.smartMoneySignals.slice(0, 50);
-        }
-        updateDashboard();
+        // Drop malformed events from the feed
+        if (!trade.size || tradeValueUsd === 0) return;
 
         const isSell = trade.side === 'SELL';
         const traderLower = trade.traderAddress.toLowerCase();
@@ -626,6 +610,22 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           );
           if (!hasOurPosition) return;
         }
+
+        // Log to Smart Money panel only for trades we're actually copying (followed wallets only)
+        const signal: SmartMoneySignal = {
+          id: `sm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          timestamp: new Date().toISOString(),
+          wallet: trade.traderAddress,
+          market: trade.marketSlug || 'Unknown',
+          side: trade.side as 'BUY' | 'SELL',
+          size: trade.size,
+          price: trade.price,
+        };
+        state.smartMoneySignals.unshift(signal);
+        if (state.smartMoneySignals.length > 50) {
+          state.smartMoneySignals = state.smartMoneySignals.slice(0, 50);
+        }
+        updateDashboard();
 
         log('SIGNAL', `COPY $${tradeValueUsd.toFixed(0)} — ${trade.side} from ${trade.traderAddress.slice(0, 10)}...`, {
           market: trade.marketSlug?.slice(0, 50),
