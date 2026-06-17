@@ -2040,18 +2040,18 @@ async function main() {
       state.paperPositions = [];
       state.positions = [];
       state.smartMoneySignals = [];
-      if (state.paper) {
-        state.paper = {
-          balance: CONFIG.capital.totalUsd,
-          initialBalance: CONFIG.capital.totalUsd,
-          pnl: 0,
-          trades: 0,
-          totalVolume: 0,
-        };
-      }
+      // Always reset paper wallet unconditionally
+      state.paper = {
+        balance: CONFIG.capital.totalUsd,
+        initialBalance: CONFIG.capital.totalUsd,
+        pnl: 0,
+        trades: 0,
+        totalVolume: 0,
+      };
 
       log('INFO', '♻️ Bot reset via dashboard — fresh start');
-      updateDashboard();
+      // Bypass the debounced updateDashboard() so the cleared state broadcasts immediately
+      dashboardEmitter.updateState(state);
       broadcastConfig();
     }
   });
