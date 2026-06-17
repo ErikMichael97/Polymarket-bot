@@ -2010,49 +2010,15 @@ async function main() {
     }
 
     if (command === 'reset') {
-      // Wipe persisted state file
+      // Delete state file so PM2 restart starts clean
       deletePersistedState();
-      // Clear pause flag in runtime config while keeping all other settings
+      // Keep runtime config settings (TP, SL, copy value, wallets) but clear pause flag
       const rc = loadRuntimeConfig();
       saveRuntimeConfig({ ...rc, botPaused: false });
-      milestonePauseLogged = false;
 
-      // Reset all in-memory counters and paper wallet
-      state.totalPnL = 0;
-      state.dailyPnL = 0;
-      state.monthlyPnL = 0;
-      state.tradesExecuted = 0;
-      state.wins = 0;
-      state.losses = 0;
-      state.consecutiveLosses = 0;
-      state.consecutiveWins = 0;
-      state.smartMoneyTrades = 0;
-      state.arbTrades = 0;
-      state.dipArbTrades = 0;
-      state.directTrades = 0;
-      state.arbProfit = 0;
-      state.permanentlyHalted = false;
-      state.isPaused = false;
-      state.pauseUntil = 0;
-      state.peakCapital = CONFIG.capital.totalUsd;
-      state.currentCapital = CONFIG.capital.totalUsd;
-      state.currentDrawdown = 0;
-      state.paperPositions = [];
-      state.positions = [];
-      state.smartMoneySignals = [];
-      // Always reset paper wallet unconditionally
-      state.paper = {
-        balance: CONFIG.capital.totalUsd,
-        initialBalance: CONFIG.capital.totalUsd,
-        pnl: 0,
-        trades: 0,
-        totalVolume: 0,
-      };
-
-      log('INFO', '♻️ Bot reset via dashboard — fresh start');
-      // Bypass the debounced updateDashboard() so the cleared state broadcasts immediately
-      dashboardEmitter.updateState(state);
-      broadcastConfig();
+      log('INFO', '♻️ Bot reset via dashboard — restarting process...');
+      // Exit so PM2 restarts the process fresh (equivalent to the manual rm + restart command)
+      setTimeout(() => process.exit(0), 300);
     }
   });
 

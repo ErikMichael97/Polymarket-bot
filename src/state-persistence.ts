@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -64,8 +64,6 @@ export function loadPersistedState(): PersistedState | null {
 
 export function deletePersistedState(): void {
   try {
-    if (existsSync(STATE_FILE)) {
-      writeFileSync(STATE_FILE, JSON.stringify({ deleted: true }));
-    }
+    if (existsSync(STATE_FILE)) unlinkSync(STATE_FILE);
   } catch {}
 }
