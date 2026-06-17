@@ -68,7 +68,7 @@ let CONFIG = {
 
   smartMoney: {
     enabled: process.env.SMARTMONEY_ENABLED !== 'false',
-    topN: 20,
+    topN: 50,
     // 🔴 FIXED: Stricter criteria (v3.1)
     minWinRate: 0.60,  // Up from 0.70 to match bot-config (60%+)
     minPnl: 500,       // Up from 70 to $500
@@ -518,7 +518,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
       // Check if disabled mid-process to abort early
       if (!CONFIG.smartMoney.enabled && qualified.length === 0) break;
 
-      if (qualified.length >= 10) break; // User limit: Max 10 qualified wallets
+      if (qualified.length >= CONFIG.smartMoney.topN) break;
       if (qualified.includes(entry.address)) continue;
 
       const profile = await sdk.wallets.getWalletProfile(entry.address);
