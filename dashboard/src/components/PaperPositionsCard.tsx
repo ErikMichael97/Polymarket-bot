@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { BotState } from '../types';
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 interface PaperPositionsCardProps {
   state: BotState | null;

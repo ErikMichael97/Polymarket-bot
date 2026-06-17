@@ -329,13 +329,13 @@ function canTrade(): boolean {
 }
 
 // 🔴 FIXED: Enhanced trade recording with win tracking
+// Called when a position is OPENED — increments trade count and fires milestone check
 function recordTrade(profit: number, strategy: string) {
   state.tradesExecuted++;
   state.dailyPnL += profit;
-  state.monthlyPnL += profit;  // NEW
+  state.monthlyPnL += profit;
   state.totalPnL += profit;
 
-  // Only count resolved trades (profit != 0) as wins/losses
   if (profit < 0) {
     state.losses++;
     state.consecutiveLosses++;
@@ -353,7 +353,6 @@ function recordTrade(profit: number, strategy: string) {
 
   updateDashboard();
 
-  // Check milestone — fire and forget
   checkTradeMilestone({
     tradesExecuted: state.tradesExecuted,
     totalPnL: state.totalPnL,
@@ -361,6 +360,26 @@ function recordTrade(profit: number, strategy: string) {
     currentBalance: CONFIG.capital.totalUsd + state.totalPnL,
     dryRun: CONFIG.dryRun,
   }).catch((err) => log('WARN', `Milestone check error: ${err.message}`));
+}
+
+// Called when a smart money position RESOLVES — updates P&L and win/loss streak
+// Does NOT increment tradesExecuted (entry was already counted when position opened)
+function resolvePosition(profit: number) {
+  state.dailyPnL += profit;
+  state.monthlyPnL += profit;
+  state.totalPnL += profit;
+
+  if (profit < 0) {
+    state.losses++;
+    state.consecutiveLosses++;
+    state.consecutiveWins = 0;
+  } else if (profit > 0) {
+    state.wins++;
+    state.consecutiveLosses = 0;
+    state.consecutiveWins++;
+  }
+
+  updateDashboard();
 }
 
 function simulateTrade(profit: number, strategy: string, description: string) {
@@ -522,7 +541,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
               // Return stake + profit to paper balance
               state.paper!.balance += pos.ourCost + profit;
               state.paper!.pnl += profit;
-              recordTrade(profit, 'smartMoney');
+              resolvePosition(profit);
               log('TRADE', `[PAPER CLOSED via SELL] ${profit >= 0 ? '✅ WIN' : '❌ LOSS'} | ${pos.market} | ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`);
             } else {
               log('SIGNAL', `SELL from ${trade.traderAddress.slice(0, 10)}... — no matching open position on ${trade.marketSlug || 'unknown'}, skipping`);
@@ -565,6 +584,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
 
           const pctDisplay = (sizePct * 100).toFixed(1);
           log('TRADE', `[SIMULATION] Smart Money Copy: BUY ${trade.size} shares @ ${trade.price} (${pctDisplay}% = $${ourCost.toFixed(2)}) | position opened`);
+          recordTrade(0, 'smartMoney'); // count entry for milestone + session summary
         } else {
           // LIVE MODE
 
@@ -1154,7 +1174,7 @@ async function checkPaperPositionOutcomes(sdk: PolymarketSDK) {
       // Return cost + profit to paper balance
       state.paper!.balance += pos.ourCost + profit;
       state.paper!.pnl += profit;
-      recordTrade(profit, 'smartMoney');
+      resolvePosition(profit);
 
       log('TRADE', `[PAPER RESOLVED] ${weWon ? '✅ WIN' : '❌ LOSS'} | ${pos.market} | ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`);
     } catch {
@@ -1212,7 +1232,7 @@ async function checkTakeProfitTargets(sdk: PolymarketSDK) {
 
       state.paper!.balance += pos.ourCost + profit;
       state.paper!.pnl += profit;
-      recordTrade(profit, 'smartMoney');
+      resolvePosition(profit);
 
       log('TRADE', `[TAKE PROFIT] ✅ ${pos.market} | +${returnPct.toFixed(1)}% hit target ${targetPct}% | +$${profit.toFixed(2)}`);
     } catch {
@@ -1271,7 +1291,7 @@ async function setupPortfolioManager(sdk: PolymarketSDK) {
                 const profit = pos.isWinner
                   ? size * (1 - entry)   // WIN: size * remaining payout
                   : -(size * entry);     // LOSS: lose the entry cost
-                recordTrade(profit, 'smartMoney');
+                resolvePosition(profit);
                 log('TRADE', `[LIVE RESOLVED] ${pos.isWinner ? '✅ WIN' : '❌ LOSS'} | ${pos.conditionId?.slice(0, 12)}... | ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`);
               }
             }
