@@ -26,6 +26,7 @@ import { isOrderSlice } from './src/slice-detector.js';
 import { sendDailyDigest } from './src/digest.js';
 import { checkTradeMilestone, isMilestonePaused } from './src/milestone.js';
 import { loadRuntimeConfig, saveRuntimeConfig } from './src/config-store.js';
+import { saveState, loadPersistedState, type PersistedState } from './src/state-persistence.js';
 
 // ============================================================================
 // CONFIGURATION (same as bot-config.ts)
@@ -247,6 +248,43 @@ function updateDashboard() {
   }, 500);
 }
 
+let _persistPending = false;
+function persistState() {
+  if (_persistPending) return;
+  _persistPending = true;
+  setTimeout(() => {
+    const ps: PersistedState = {
+      savedAt: new Date().toISOString(),
+      tradesExecuted: state.tradesExecuted,
+      totalPnL: state.totalPnL,
+      dailyPnL: state.dailyPnL,
+      monthlyPnL: state.monthlyPnL,
+      wins: state.wins,
+      losses: state.losses,
+      consecutiveLosses: state.consecutiveLosses,
+      consecutiveWins: state.consecutiveWins,
+      smartMoneyTrades: state.smartMoneyTrades,
+      arbTrades: state.arbTrades,
+      dipArbTrades: state.dipArbTrades,
+      directTrades: state.directTrades,
+      arbProfit: state.arbProfit,
+      peakCapital: state.peakCapital,
+      currentCapital: state.currentCapital,
+      currentDrawdown: state.currentDrawdown,
+      permanentlyHalted: state.permanentlyHalted,
+      monthStartTime: state.monthStartTime,
+      lastDailyReset: state.lastDailyReset,
+      paperBalance: state.paper?.balance ?? null,
+      paperInitialBalance: state.paper?.initialBalance ?? null,
+      paperPnL: state.paper?.pnl ?? null,
+      paperTrades: state.paper?.trades ?? null,
+      paperPositions: state.paperPositions ?? [],
+    };
+    saveState(ps);
+    _persistPending = false;
+  }, 2000); // write to disk at most every 2 seconds
+}
+
 function broadcastConfig() {
   const runtimeCfg = loadRuntimeConfig();
   dashboardEmitter.updateConfig({
@@ -395,6 +433,7 @@ function recordTrade(profit: number, strategy: string) {
   else if (strategy === 'direct') state.directTrades++;
 
   updateDashboard();
+  persistState();
 
   checkTradeMilestone({
     tradesExecuted: state.tradesExecuted,
@@ -423,6 +462,7 @@ function resolvePosition(profit: number) {
   }
 
   updateDashboard();
+  persistState();
 }
 
 function simulateTrade(profit: number, strategy: string, description: string) {
@@ -623,7 +663,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
             signalValue: tradeValueUsd,
             ourCost,
           });
-          if (state.paperPositions.length > 100) state.paperPositions = state.paperPositions.slice(0, 100);
+          if (state.paperPositions.length > 500) state.paperPositions = state.paperPositions.slice(0, 500);
 
           const pctDisplay = (sizePct * 100).toFixed(1);
           log('TRADE', `[SIMULATION] Smart Money Copy: BUY ${trade.size} shares @ ${trade.price} (${pctDisplay}% = $${ourCost.toFixed(2)}) | position opened`);
@@ -1532,16 +1572,45 @@ async function main() {
     }
   });
 
+  // Restore persisted state from last run (survives PM2 restarts)
+  const saved = loadPersistedState();
+  if (saved) {
+    state.tradesExecuted = saved.tradesExecuted;
+    state.totalPnL = saved.totalPnL;
+    state.dailyPnL = saved.dailyPnL;
+    state.monthlyPnL = saved.monthlyPnL;
+    state.wins = saved.wins;
+    state.losses = saved.losses;
+    state.consecutiveLosses = saved.consecutiveLosses;
+    state.consecutiveWins = saved.consecutiveWins;
+    state.smartMoneyTrades = saved.smartMoneyTrades;
+    state.arbTrades = saved.arbTrades;
+    state.dipArbTrades = saved.dipArbTrades;
+    state.directTrades = saved.directTrades;
+    state.arbProfit = saved.arbProfit;
+    state.peakCapital = saved.peakCapital;
+    state.currentCapital = saved.currentCapital;
+    state.currentDrawdown = saved.currentDrawdown;
+    state.permanentlyHalted = saved.permanentlyHalted;
+    state.monthStartTime = saved.monthStartTime;
+    state.lastDailyReset = saved.lastDailyReset;
+    if (Array.isArray(saved.paperPositions)) {
+      state.paperPositions = saved.paperPositions as typeof state.paperPositions;
+    }
+    log('INFO', `♻️ State restored: ${saved.tradesExecuted} trades, P&L $${saved.totalPnL.toFixed(2)}, ${(saved.paperPositions ?? []).length} positions`);
+  }
+
   // Initialize Paper Wallet if Dry Run
   if (CONFIG.dryRun) {
+    const restoredBalance = saved?.paperBalance ?? CONFIG.capital.totalUsd;
     state.paper = {
-      balance: CONFIG.capital.totalUsd,
-      initialBalance: CONFIG.capital.totalUsd,
-      pnl: 0,
-      trades: 0,
+      balance: restoredBalance,
+      initialBalance: saved?.paperInitialBalance ?? CONFIG.capital.totalUsd,
+      pnl: saved?.paperPnL ?? 0,
+      trades: saved?.paperTrades ?? 0,
       totalVolume: 0,
     };
-    log('INFO', '📝 Paper Trading Activated: Simulating trades with $250 initial capital');
+    log('INFO', `📝 Paper Trading Activated — balance: $${restoredBalance.toFixed(2)}`);
     updateDashboard();
   }
 
