@@ -278,15 +278,6 @@ function canTrade(): boolean {
   }
   state.currentDrawdown = (state.peakCapital - state.currentCapital) / state.peakCapital;
 
-  // Check paper balance floor — don't enter new trades if balance can't cover the minimum stake
-  if (CONFIG.dryRun && state.paper) {
-    const minStake = CONFIG.capital.totalUsd * CONFIG.risk.minPositionPct;
-    if (state.paper.balance < minStake) {
-      log('WARN', `Paper balance depleted ($${state.paper.balance.toFixed(2)}). No new trades until positions resolve.`);
-      return false;
-    }
-  }
-
   // Check temporary pause
   if (state.isPaused && Date.now() < state.pauseUntil) return false;
   if (state.isPaused && Date.now() >= state.pauseUntil) {
@@ -550,7 +541,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           }
           const ourCost = sizePct * CONFIG.capital.totalUsd;
 
-          state.paper.balance = Math.max(0, state.paper.balance - ourCost);
+          state.paper.balance -= ourCost;
 
           const conditionId = (trade as any).conditionId as string | undefined;
           const tokenId = (trade as any).tokenId as string | undefined;
