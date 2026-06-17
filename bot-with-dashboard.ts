@@ -593,7 +593,14 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
 
         if (!isSell) {
           // BUY: only copy from wallets we're actively following
-          if (!isFollowedWallet) return;
+          if (!isFollowedWallet) {
+            if (state.followedWallets.length === 0) {
+              log('WARN', `[WalletFilter] BUY dropped — followed wallet list is still empty (leaderboard still loading?)`);
+            } else {
+              log('SIGNAL', `[WalletFilter] BUY from ${traderLower.slice(0, 10)}... not in followed list (${state.followedWallets.length} wallets: ${state.followedWallets.slice(0, 2).map(w => w.slice(0, 10)).join(', ')}...)`);
+            }
+            return;
+          }
           if (!canTrade()) return;
           if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
           if (trade.price < 0.05) {
