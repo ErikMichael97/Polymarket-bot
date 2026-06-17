@@ -1312,10 +1312,10 @@ async function setupPortfolioManager(sdk: PolymarketSDK) {
     checkPaperPositionOutcomes(sdk).catch(() => {});
     checkTakeProfitTargets(sdk).catch(() => {});
 
-    // Watchdog: if Smart Money feed has been silent for 15+ minutes, force reconnect.
-    // The underlying WebSocket has auto-reconnect but the subscription can silently drop.
+    // Watchdog: if Smart Money feed has been silent for 10+ minutes, force reconnect.
+    // Polymarket has continuous global activity — 10min of total silence = dead subscription.
     const silentMs = Date.now() - lastSmartMoneyActivityMs;
-    if (CONFIG.smartMoney.enabled && silentMs > 15 * 60 * 1000 && state.followedWallets.length > 0) {
+    if (CONFIG.smartMoney.enabled && silentMs > 10 * 60 * 1000 && state.followedWallets.length > 0) {
       log('WARN', `[WATCHDOG] Smart Money feed silent for ${Math.round(silentMs / 60000)}min — forcing reconnect`);
       try { sdk.smartMoney.disconnect(); } catch {}
       isSmartMoneyInitialized = false;
