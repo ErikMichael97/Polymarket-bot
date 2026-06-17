@@ -454,14 +454,9 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           return;
         }
 
-        // SELL signals always process (close existing positions and return capital to balance)
-        // canTrade() only gates new BUY entries
-        const isSell = trade.side === 'SELL';
-        if (!isSell && !canTrade()) return;
-
         const tradeValueUsd = trade.size * trade.price;
 
-        // Always track in SmartMoney panel so you can see all wallet activity
+        // Always log to the SmartMoney panel — even when paused, you can see wallet activity
         const signal: SmartMoneySignal = {
           id: `sm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           timestamp: new Date().toISOString(),
@@ -476,6 +471,11 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           state.smartMoneySignals = state.smartMoneySignals.slice(0, 50);
         }
         updateDashboard();
+
+        // SELL signals always execute (close existing positions and return capital to balance)
+        // canTrade() only gates new BUY entries
+        const isSell = trade.side === 'SELL';
+        if (!isSell && !canTrade()) return;
 
         // Only copy if trade value meets the minimum threshold
         if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
