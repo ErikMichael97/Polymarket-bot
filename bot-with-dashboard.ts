@@ -724,10 +724,9 @@ let swapService: SwapService | null = null;
 
 async function updateBalances() {
   if (CONFIG.dryRun) {
-    // SIMULATION: Mock balances
-    // Base 10,000 + whatever PnL we've made in this session
-    state.usdcEBalance = 10000 + state.totalPnL;
-    state.maticBalance = 100;
+    // SIMULATION: Mock balances based on configured capital
+    state.usdcEBalance = CONFIG.capital.totalUsd + state.totalPnL;
+    state.maticBalance = 1.0;
 
     // Only verify once/log sparsely
     if (Math.random() < 0.05) { // Occasional log
