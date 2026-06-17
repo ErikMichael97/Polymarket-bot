@@ -385,6 +385,7 @@ function simulateTrade(profit: number, strategy: string, description: string) {
 let arbService: ArbitrageService | null = null;
 let isSmartMoneyInitialized = false;
 let isSmartMoneyInitializing = false;
+let lastSmartMoneyActivityMs = Date.now();
 
 async function setupSmartMoney(sdk: PolymarketSDK) {
   if (CONFIG.smartMoney.enabled) {
@@ -446,6 +447,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
     sdk.smartMoney.subscribeSmartMoneyTrades(
       async (trade: SmartMoneyTrade) => {
         if (!CONFIG.smartMoney.enabled) return;
+        lastSmartMoneyActivityMs = Date.now(); // heartbeat — watchdog uses this to detect dead feed
 
         // Deduplicate order slices — top wallets split one position into many fills
         if (isOrderSlice(trade.traderAddress, trade.marketSlug || trade.conditionId || 'unknown')) {
@@ -1309,6 +1311,18 @@ async function setupPortfolioManager(sdk: PolymarketSDK) {
   setInterval(() => {
     checkPaperPositionOutcomes(sdk).catch(() => {});
     checkTakeProfitTargets(sdk).catch(() => {});
+
+    // Watchdog: if Smart Money feed has been silent for 15+ minutes, force reconnect.
+    // The underlying WebSocket has auto-reconnect but the subscription can silently drop.
+    const silentMs = Date.now() - lastSmartMoneyActivityMs;
+    if (CONFIG.smartMoney.enabled && silentMs > 15 * 60 * 1000 && state.followedWallets.length > 0) {
+      log('WARN', `[WATCHDOG] Smart Money feed silent for ${Math.round(silentMs / 60000)}min — forcing reconnect`);
+      try { sdk.smartMoney.disconnect(); } catch {}
+      isSmartMoneyInitialized = false;
+      isSmartMoneyInitializing = false;
+      lastSmartMoneyActivityMs = Date.now(); // reset before reconnect so we don't loop
+      initializeSmartMoney(sdk).catch(err => log('WARN', `SmartMoney reconnect failed: ${err.message}`));
+    }
   }, 5 * 60 * 1000);
 }
 
