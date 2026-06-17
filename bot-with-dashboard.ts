@@ -342,11 +342,11 @@ function canTrade(): boolean {
     return false;
   }
 
-  // Paper trading: halt if balance is fully depleted
-  if (state.paper && state.paper.balance <= 0 && (state.paper.trades ?? 0) > 0) {
+  // Paper trading: halt if balance is depleted
+  if (state.paper && state.paper.balance <= 0) {
     if (!state.permanentlyHalted) {
       state.permanentlyHalted = true;
-      log('ERROR', '💀 Paper balance depleted — trading halted. Reset bot data to restart.');
+      log('ERROR', '💀 Paper balance depleted — trading halted. Reset bot to restart.');
       updateDashboard();
     }
     return false;
@@ -601,6 +601,12 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           }
           const ourCost = sizePct * CONFIG.capital.totalUsd;
 
+          if (state.paper!.balance < ourCost) {
+            state.permanentlyHalted = true;
+            log('ERROR', `💀 Paper balance too low ($${state.paper!.balance.toFixed(2)}) — trading halted`);
+            updateDashboard();
+            return;
+          }
           state.paper!.balance -= ourCost;
 
           const tokenId = (trade as any).tokenId as string | undefined;

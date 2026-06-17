@@ -79,7 +79,14 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
 
   const handleReset = () => {
     if (window.confirm('Reset bot?\n\nThis will wipe all P&L, trade history, paper positions, and restart the paper wallet. Your settings (TP, SL, min copy value) will be kept.\n\nThis cannot be undone.')) {
-      onUpdateConfig('__reset__', true);
+      // Use HTTP POST directly — more reliable than going through WebSocket
+      fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'reset', payload: {} }),
+      }).catch(() => {
+        // Fetch will error when the process exits — that's expected
+      });
     }
   };
 
