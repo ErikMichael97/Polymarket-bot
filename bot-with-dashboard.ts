@@ -1924,17 +1924,25 @@ async function main() {
       }
 
       if (key === 'addWallet' && typeof value === 'string' && value.startsWith('0x') && value.length === 42) {
-        if (!(CONFIG.smartMoney.customWallets as string[]).includes(value)) {
+        const walletLower = value.toLowerCase();
+        if (!(CONFIG.smartMoney.customWallets as string[]).map(w => w.toLowerCase()).includes(walletLower)) {
           (CONFIG.smartMoney.customWallets as string[]).push(value);
-          log('INFO', `Custom wallet added: ${value.slice(0, 10)}... — disable/re-enable Smart Money to apply`);
+          if (!state.followedWallets.map(w => w.toLowerCase()).includes(walletLower)) {
+            state.followedWallets.push(value);
+          }
+          log('WALLET', `⭐ Custom wallet added live: ${value.slice(0, 10)}...`);
+          updateDashboard();
         } else {
           log('WARN', `Wallet already tracked: ${value.slice(0, 10)}...`);
         }
       }
 
       if (key === 'removeWallet' && typeof value === 'string') {
-        (CONFIG.smartMoney as any).customWallets = (CONFIG.smartMoney.customWallets as string[]).filter(w => w !== value);
-        log('INFO', `Custom wallet removed: ${value.slice(0, 10)}...`);
+        const walletLower = value.toLowerCase();
+        (CONFIG.smartMoney as any).customWallets = (CONFIG.smartMoney.customWallets as string[]).filter(w => w.toLowerCase() !== walletLower);
+        state.followedWallets = state.followedWallets.filter(w => w.toLowerCase() !== walletLower);
+        log('WALLET', `🗑️ Custom wallet removed: ${value.slice(0, 10)}...`);
+        updateDashboard();
       }
 
       if (key === 'takeProfit') {

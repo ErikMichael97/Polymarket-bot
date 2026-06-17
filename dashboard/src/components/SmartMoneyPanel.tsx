@@ -1,13 +1,18 @@
+import { useState } from 'react';
 import type { BotState } from '../types';
 
 interface SmartMoneyPanelProps {
   state: BotState | null;
+  onCommand: (command: string, payload: Record<string, unknown>) => void;
 }
 
-export function SmartMoneyPanel({ state }: SmartMoneyPanelProps) {
+export function SmartMoneyPanel({ state, onCommand }: SmartMoneyPanelProps) {
   const signals = state?.smartMoneySignals ?? [];
   const followedWallets = state?.followedWallets ?? [];
   const trades = state?.smartMoneyTrades ?? 0;
+
+  const [walletInput, setWalletInput] = useState('');
+  const [inputError, setInputError] = useState('');
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -21,6 +26,21 @@ export function SmartMoneyPanel({ state }: SmartMoneyPanelProps) {
 
   const shortenAddress = (addr: string) => {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  };
+
+  const handleAddWallet = () => {
+    const trimmed = walletInput.trim();
+    if (!trimmed.startsWith('0x') || trimmed.length !== 42) {
+      setInputError('Must be a valid 0x address (42 chars)');
+      return;
+    }
+    setInputError('');
+    onCommand('updateConfig', { key: 'addWallet', value: trimmed });
+    setWalletInput('');
+  };
+
+  const handleRemoveWallet = (wallet: string) => {
+    onCommand('updateConfig', { key: 'removeWallet', value: wallet });
   };
 
   return (
@@ -67,13 +87,13 @@ export function SmartMoneyPanel({ state }: SmartMoneyPanelProps) {
           <span>Recent Whale Activity</span>
           <span className="text-gray-600">{signals.length} signals</span>
         </div>
-        
+
         <div className="space-y-2 max-h-64 overflow-y-auto">
           {signals.length === 0 ? (
             <div className="bg-poly-dark/30 rounded-xl p-8 text-center">
               <div className="text-4xl mb-3">🐋</div>
               <div className="text-gray-400">Monitoring whale wallets...</div>
-              <div className="text-xs text-gray-500 mt-1">Signals appear when whales make trades</div>
+              <div className="text-xs text-gray-500 mt-1">Signals appear when tracked wallets trade</div>
             </div>
           ) : (
             signals.slice(0, 10).map((signal) => (
@@ -117,30 +137,61 @@ export function SmartMoneyPanel({ state }: SmartMoneyPanelProps) {
           )}
         </div>
 
-        {/* Followed Wallets Preview */}
-        {followedWallets.length > 0 && (
-          <>
-            <div className="divider" />
-            <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">
-              Tracked Wallets
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {followedWallets.slice(0, 5).map((wallet) => (
-                <code
-                  key={wallet}
-                  className="px-2 py-1 bg-poly-dark/50 rounded text-xs text-gray-400 font-mono"
+        {/* Tracked Wallets */}
+        <div className="divider" />
+        <div className="text-xs text-gray-500 uppercase tracking-wider mb-3">
+          Tracked Wallets
+        </div>
+
+        {followedWallets.length > 0 ? (
+          <div className="space-y-1 mb-4 max-h-40 overflow-y-auto">
+            {followedWallets.map((wallet) => (
+              <div
+                key={wallet}
+                className="flex items-center justify-between px-3 py-2 bg-poly-dark/50 rounded-lg border border-white/5"
+              >
+                <code className="text-xs text-gray-300 font-mono">{shortenAddress(wallet)}</code>
+                <button
+                  onClick={() => handleRemoveWallet(wallet)}
+                  className="text-xs text-red-500 hover:text-red-400 transition-colors px-2 py-0.5 rounded hover:bg-red-500/10"
                 >
-                  {shortenAddress(wallet)}
-                </code>
-              ))}
-              {followedWallets.length > 5 && (
-                <span className="px-2 py-1 text-xs text-gray-500">
-                  +{followedWallets.length - 5} more
-                </span>
-              )}
-            </div>
-          </>
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-gray-600 mb-4 text-center py-3">
+            No wallets followed yet — auto-detection running
+          </div>
         )}
+
+        {/* Add Wallet Input */}
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={walletInput}
+              onChange={(e) => {
+                setWalletInput(e.target.value);
+                setInputError('');
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddWallet()}
+              placeholder="0x... wallet address"
+              className="flex-1 bg-poly-dark/70 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/50 transition-colors"
+            />
+            <button
+              onClick={handleAddWallet}
+              disabled={!walletInput.trim()}
+              className="px-4 py-2 text-xs font-medium rounded-lg bg-purple-600/80 hover:bg-purple-600 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Add
+            </button>
+          </div>
+          {inputError && (
+            <div className="text-xs text-red-400">{inputError}</div>
+          )}
+        </div>
       </div>
     </div>
   );
