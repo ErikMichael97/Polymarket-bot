@@ -24,6 +24,17 @@ export interface SmartMoneySignal {
   price: number;
 }
 
+export interface PaperPosition {
+  id: string;
+  timestamp: string;
+  wallet: string;
+  market: string;
+  side: 'BUY' | 'SELL';
+  shares: number;
+  entryPrice: number;
+  cost: number;
+}
+
 export interface BotState {
   startTime: number;
   dailyPnL: number;
@@ -80,6 +91,11 @@ export interface BotState {
 
   // Portfolio Sync (positions)
   positions?: any[];
+
+  paperPositions?: PaperPosition[];
+
+  wins?: number;
+  losses?: number;
 }
 
 export interface BotConfig {

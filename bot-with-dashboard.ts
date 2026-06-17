@@ -212,6 +212,9 @@ const state: BotState = {
   },
 
   smartMoneySignals: [],
+  paperPositions: [],
+  wins: 0,
+  losses: 0,
 };
 
 // ============================================================================
@@ -332,11 +335,13 @@ function recordTrade(profit: number, strategy: string) {
   state.monthlyPnL += profit;  // NEW
   state.totalPnL += profit;
 
-  // Track consecutive wins/losses
+  // Only count resolved trades (profit != 0) as wins/losses
   if (profit < 0) {
+    state.losses++;
     state.consecutiveLosses++;
     state.consecutiveWins = 0;
-  } else {
+  } else if (profit > 0) {
+    state.wins++;
     state.consecutiveLosses = 0;
     state.consecutiveWins++;
   }
@@ -481,6 +486,19 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           if (state.paper) {
             state.paper.balance -= tradeValueUsd;
           }
+          // Track as open paper position
+          if (!state.paperPositions) state.paperPositions = [];
+          state.paperPositions.unshift({
+            id: signal.id,
+            timestamp: new Date().toISOString(),
+            wallet: trade.traderAddress,
+            market: trade.marketSlug || 'Unknown',
+            side: trade.side as 'BUY' | 'SELL',
+            shares: trade.size,
+            entryPrice: trade.price,
+            cost: tradeValueUsd,
+          });
+          if (state.paperPositions.length > 100) state.paperPositions = state.paperPositions.slice(0, 100);
           simulateTrade(0, 'smartMoney', `Smart Money Copy: ${trade.side} ${trade.size} shares @ ${trade.price}`);
         } else {
           // ... live execution

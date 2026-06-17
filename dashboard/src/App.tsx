@@ -19,6 +19,7 @@ import {
   PositionsPage,
   StrategyControls,
   TakeProfitPanel,
+  PaperPositionsCard,
 } from './components';
 
 type Page = 'dashboard' | 'history' | 'positions';
@@ -167,13 +168,14 @@ function App() {
           <DipArbPanel state={state} />
           <ArbitragePanel state={state} />
           <PnLPanel state={state} config={config} />
-          <SessionSummary state={state} />
+          <SessionSummary state={state} dryRun={isDryRun} />
         </div>
 
         {/* Row 3: Smart Money (main) + Side Panel (Trends + Strategies + OnChain) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-4">
             <SmartMoneyPanel state={state} />
+            {isDryRun && <PaperPositionsCard state={state} />}
           </div>
           <div className="space-y-3">
             <StrategyControls config={config} onToggle={handleToggleStrategy} />

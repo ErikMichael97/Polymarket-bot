@@ -20,3 +20,4 @@ export { Sparkline } from './Sparkline';
 export { PositionsPage } from './PositionsPage';
 export { StrategyControls } from './StrategyControls';
 export { TakeProfitPanel } from './TakeProfitPanel';
+export { PaperPositionsCard } from './PaperPositionsCard';

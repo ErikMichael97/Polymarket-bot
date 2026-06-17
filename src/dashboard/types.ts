@@ -85,6 +85,11 @@ export interface BotState {
     trades: number;
     totalVolume: number;
   };
+
+  paperPositions?: PaperPosition[];
+
+  wins: number;
+  losses: number;
 }
 
 export interface DipArbSignal {
@@ -111,6 +116,17 @@ export interface SmartMoneySignal {
   side: 'BUY' | 'SELL';
   size: number;
   price: number;
+}
+
+export interface PaperPosition {
+  id: string;
+  timestamp: string;
+  wallet: string;
+  market: string;
+  side: 'BUY' | 'SELL';
+  shares: number;
+  entryPrice: number;
+  cost: number;
 }
 
 export interface BotConfig {

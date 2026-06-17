@@ -2,18 +2,17 @@ import type { BotState } from '../types';
 
 interface SessionSummaryProps {
   state: BotState | null;
+  dryRun?: boolean;
 }
 
-export function SessionSummary({ state }: SessionSummaryProps) {
+export function SessionSummary({ state, dryRun }: SessionSummaryProps) {
   const trades = state?.tradesExecuted ?? 0;
   const totalPnL = state?.totalPnL ?? 0;
+  const wins = state?.wins ?? 0;
+  const losses = state?.losses ?? 0;
+  const pending = trades - wins - losses;
+  const winRate = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0;
   const avgProfit = trades > 0 ? totalPnL / trades : 0;
-  
-  // Calculate estimated wins/losses based on P&L
-  const estimatedWins = trades > 0 ? Math.round(trades * 0.5 + (totalPnL > 0 ? totalPnL / 10 : totalPnL / 20)) : 0;
-  const wins = Math.max(0, Math.min(trades, estimatedWins));
-  const losses = Math.max(0, trades - wins);
-  const winRate = trades > 0 ? (wins / trades) * 100 : 0;
 
   const arbProfit = state?.arbProfit ?? 0;
   const smartMoneyTrades = state?.smartMoneyTrades ?? 0;
@@ -35,47 +34,64 @@ export function SessionSummary({ state }: SessionSummaryProps) {
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="text-center">
             <div className="text-3xl font-bold font-mono text-green-400 glow-text-green">
-              {wins}
+              {dryRun ? '—' : wins}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Wins</div>
           </div>
           <div className="text-center">
             <div className="text-3xl font-bold font-mono text-red-400">
-              {losses}
+              {dryRun ? '—' : losses}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Losses</div>
           </div>
           <div className="text-center">
-            <div className={`text-3xl font-bold font-mono ${winRate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
-              {winRate.toFixed(0)}%
+            <div className={`text-3xl font-bold font-mono ${dryRun ? 'text-gray-500' : winRate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
+              {dryRun ? '—' : `${winRate.toFixed(0)}%`}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Win Rate</div>
           </div>
           <div className="text-center">
             <div className={`text-3xl font-bold font-mono ${avgProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              ${avgProfit.toFixed(2)}
+              {dryRun ? '—' : `$${avgProfit.toFixed(2)}`}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Avg/Trade</div>
           </div>
         </div>
 
-        {/* Win Rate Bar */}
-        <div className="mb-6">
-          <div className="flex justify-between text-xs text-gray-500 mb-2">
-            <span>Win Rate Distribution</span>
-            <span>{wins}W - {losses}L</span>
+        {dryRun ? (
+          <div className="mb-6">
+            <div className="flex justify-between text-xs text-gray-500 mb-2">
+              <span>Positions</span>
+              <span>{trades} copied — pending market resolution</span>
+            </div>
+            <div className="h-3 rounded-full bg-gray-800 overflow-hidden">
+              <div
+                className="h-full bg-blue-500/40 transition-all duration-500"
+                style={{ width: trades > 0 ? `${Math.min(100, (pending / Math.max(1, trades)) * 100)}%` : '0%' }}
+              />
+            </div>
+            <div className="text-xs text-gray-600 mt-1 text-center">
+              Win/loss tracked on market resolution (live mode only)
+            </div>
           </div>
-          <div className="h-3 rounded-full bg-gray-800 overflow-hidden flex">
-            <div 
-              className="h-full progress-gradient-green transition-all duration-500"
-              style={{ width: `${winRate}%` }}
-            />
-            <div 
-              className="h-full progress-gradient-red transition-all duration-500"
-              style={{ width: `${100 - winRate}%` }}
-            />
+        ) : (
+          <div className="mb-6">
+            <div className="flex justify-between text-xs text-gray-500 mb-2">
+              <span>Win Rate Distribution</span>
+              <span>{wins}W - {losses}L</span>
+            </div>
+            <div className="h-3 rounded-full bg-gray-800 overflow-hidden flex">
+              <div
+                className="h-full progress-gradient-green transition-all duration-500"
+                style={{ width: `${winRate}%` }}
+              />
+              <div
+                className="h-full progress-gradient-red transition-all duration-500"
+                style={{ width: `${100 - winRate}%` }}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="divider" />
 
