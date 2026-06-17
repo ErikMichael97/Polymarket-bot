@@ -140,6 +140,7 @@ export interface BotConfig {
     minTrades: number;
     customWallets: string[];
     minCopyValueUsd?: number;
+    largeSellThresholdUsd?: number;
   };
   arbitrage: {
     enabled: boolean;
@@ -158,6 +159,10 @@ export interface BotConfig {
   };
   dryRun: boolean;
   takeProfit?: {
+    enabled: boolean;
+    targetPct: number;
+  };
+  stopLoss?: {
     enabled: boolean;
     targetPct: number;
   };
