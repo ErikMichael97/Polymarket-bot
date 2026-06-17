@@ -586,7 +586,9 @@ export class RealtimeServiceV2 extends EventEmitter {
           { topic: 'activity', type: 'orders_matched' },
         ];
 
-    this.sendSubscription({ subscriptions });
+    const subMsg = { subscriptions };
+    this.sendSubscription(subMsg);
+    this.subscriptionMessages.set(subId, subMsg); // persist for reconnect — without this, a 1006 drop loses the feed permanently
 
     const handler = (trade: ActivityTrade) => handlers.onTrade?.(trade);
     this.on('activityTrade', handler);
@@ -599,6 +601,7 @@ export class RealtimeServiceV2 extends EventEmitter {
         this.off('activityTrade', handler);
         this.sendUnsubscription({ subscriptions });
         this.subscriptions.delete(subId);
+        this.subscriptionMessages.delete(subId);
       },
     };
 
