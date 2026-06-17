@@ -15,7 +15,7 @@ export interface MilestoneStats {
   dryRun: boolean;
 }
 
-export async function checkTradeMilestone(stats: MilestoneStats): Promise<void> {
+export async function checkTradeMilestone(stats: MilestoneStats, onPause?: () => void): Promise<void> {
   const milestone = parseInt(process.env.TRADE_MILESTONE ?? '100');
   const count = stats.tradesExecuted;
 
@@ -26,6 +26,7 @@ export async function checkTradeMilestone(stats: MilestoneStats): Promise<void> 
   ) {
     lastMilestoneChecked = count;
     await triggerMilestonePause(count, stats);
+    onPause?.(); // notify caller so dashboard config can be broadcast immediately
   }
 }
 

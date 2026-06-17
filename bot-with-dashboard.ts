@@ -241,13 +241,50 @@ function updateDashboard() {
   dashboardEmitter.updateState(state);
 }
 
+function broadcastConfig() {
+  const runtimeCfg = loadRuntimeConfig();
+  dashboardEmitter.updateConfig({
+    capital: CONFIG.capital,
+    risk: CONFIG.risk,
+    smartMoney: {
+      enabled: CONFIG.smartMoney.enabled,
+      topN: CONFIG.smartMoney.topN,
+      minWinRate: CONFIG.smartMoney.minWinRate,
+      minPnl: CONFIG.smartMoney.minPnl,
+      minTrades: CONFIG.smartMoney.minTrades,
+      customWallets: CONFIG.smartMoney.customWallets,
+      minCopyValueUsd: CONFIG.smartMoney.minCopyValueUsd,
+    },
+    arbitrage: {
+      enabled: CONFIG.arbitrage.enabled,
+      profitThreshold: CONFIG.arbitrage.profitThreshold,
+      autoExecute: CONFIG.arbitrage.autoExecute,
+    },
+    dipArb: { enabled: CONFIG.dipArb.enabled, coins: CONFIG.dipArb.coins },
+    directTrading: { enabled: CONFIG.directTrading.enabled },
+    binance: { enabled: CONFIG.binance.enabled },
+    dryRun: CONFIG.dryRun,
+    takeProfit: {
+      enabled: runtimeCfg.takeProfit.enabled,
+      targetPct: runtimeCfg.takeProfit.targetPct,
+    },
+    botPaused: runtimeCfg.botPaused,
+  });
+}
+
+let milestonePauseLogged = false; // prevent log spam when paused
+
 // 🔴 FIXED: v3.1 Multi-layer risk management
 function canTrade(): boolean {
   // Check milestone pause (from config store, persists across restarts)
   if (isMilestonePaused()) {
-    log('WARN', `Bot paused at trade milestone — resume via dashboard`);
+    if (!milestonePauseLogged) {
+      log('WARN', 'Bot paused at milestone — click Resume Bot in the Controls panel to continue');
+      milestonePauseLogged = true;
+    }
     return false;
   }
+  milestonePauseLogged = false; // reset when unpaused
 
   // Check if permanently halted
   if (state.permanentlyHalted) {
@@ -359,7 +396,7 @@ function recordTrade(profit: number, strategy: string) {
     startBalance: CONFIG.capital.totalUsd,
     currentBalance: CONFIG.capital.totalUsd + state.totalPnL,
     dryRun: CONFIG.dryRun,
-  }).catch((err) => log('WARN', `Milestone check error: ${err.message}`));
+  }, broadcastConfig).catch((err) => log('WARN', `Milestone check error: ${err.message}`));
 }
 
 // Called when a smart money position RESOLVES — updates P&L and win/loss streak
@@ -1784,33 +1821,11 @@ async function main() {
       if (key === 'botPaused' && value === false) {
         const current = loadRuntimeConfig();
         saveRuntimeConfig({ ...current, botPaused: false });
+        milestonePauseLogged = false; // allow next pause to log again
         log('INFO', '▶️ Bot resumed after milestone pause');
       }
 
-      // Broadcast updated config
-      dashboardEmitter.updateConfig({
-        capital: CONFIG.capital,
-        risk: CONFIG.risk,
-        smartMoney: {
-          enabled: CONFIG.smartMoney.enabled,
-          topN: CONFIG.smartMoney.topN,
-          minWinRate: CONFIG.smartMoney.minWinRate,
-          minPnl: CONFIG.smartMoney.minPnl,
-          minTrades: CONFIG.smartMoney.minTrades,
-          customWallets: CONFIG.smartMoney.customWallets,
-          minCopyValueUsd: CONFIG.smartMoney.minCopyValueUsd,
-        },
-        arbitrage: { enabled: CONFIG.arbitrage.enabled, profitThreshold: CONFIG.arbitrage.profitThreshold, autoExecute: CONFIG.arbitrage.autoExecute },
-        dipArb: { enabled: CONFIG.dipArb.enabled, coins: CONFIG.dipArb.coins },
-        directTrading: { enabled: CONFIG.directTrading.enabled },
-        binance: { enabled: CONFIG.binance.enabled },
-        dryRun: CONFIG.dryRun,
-        takeProfit: {
-          enabled: (CONFIG as any).takeProfitEnabled ?? true,
-          targetPct: (CONFIG as any).takeProfitPct ?? 20,
-        },
-        botPaused: loadRuntimeConfig().botPaused,
-      });
+      broadcastConfig();
     }
   });
 
