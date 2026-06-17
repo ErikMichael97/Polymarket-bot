@@ -139,6 +139,7 @@ export interface BotConfig {
     minPnl: number;
     minTrades: number;
     customWallets: string[];
+    minCopyValueUsd?: number;
   };
   arbitrage: {
     enabled: boolean;

@@ -12,6 +12,9 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
   const [tradeSize, setTradeSize] = useState<number>(
     Math.round((config?.capital?.maxPerTradePct ?? 0.02) * 100)
   );
+  const [minCopyValue, setMinCopyValue] = useState<string>(
+    String(config?.smartMoney?.minCopyValueUsd ?? 1000)
+  );
   const botPaused = config?.botPaused ?? false;
   const capital = config?.capital?.totalUsd ?? 1000;
 
@@ -33,6 +36,15 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
     onUpdateConfig('tradeSize', pct / 100);
   };
 
+  const handleMinCopyValueCommit = () => {
+    const val = parseFloat(minCopyValue);
+    if (!isNaN(val) && val >= 0) {
+      onUpdateConfig('minCopyValue', val);
+    } else {
+      setMinCopyValue(String(config?.smartMoney?.minCopyValueUsd ?? 1000));
+    }
+  };
+
   const handleResume = () => {
     if (window.confirm(`Resume bot after milestone pause?\n\nMake sure you've reviewed the results before continuing.`)) {
       onUpdateConfig('botPaused', false);
@@ -44,11 +56,12 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
       <div className="panel-header">
         <h3 className="section-header mb-0">
           <div className="section-header-icon bg-gradient-to-br from-green-500/20 to-emerald-500/20">🎯</div>
-          Take Profit
+          Controls
         </h3>
         <button
           onClick={handleToggle}
           className={`relative w-12 h-6 rounded-full transition-all duration-300 ${enabled ? 'bg-green-500' : 'bg-gray-700'}`}
+          title="Toggle take-profit"
         >
           <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform duration-300 ${enabled ? 'translate-x-6' : 'translate-x-0'}`} />
         </button>
@@ -68,8 +81,31 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
           </div>
         )}
 
-        {/* Trade Size Slider */}
+        {/* Min Copy Value */}
         <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-gray-400 text-sm">Min copy value</span>
+            <span className="text-xs text-gray-600">Only copy trades ≥ this</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500 text-sm font-mono">$</span>
+            <input
+              type="number"
+              min="0"
+              step="100"
+              value={minCopyValue}
+              onChange={(e) => setMinCopyValue(e.target.value)}
+              onBlur={handleMinCopyValueCommit}
+              onKeyDown={(e) => e.key === 'Enter' && handleMinCopyValueCommit()}
+              className="flex-1 bg-poly-dark border border-white/10 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:outline-none focus:border-blue-500/50"
+              placeholder="1000"
+            />
+          </div>
+          <div className="text-xs text-gray-600 mt-1">Press Enter or click away to apply</div>
+        </div>
+
+        {/* Trade Size Slider */}
+        <div className="border-t border-white/5 pt-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-gray-400 text-sm">Trade size</span>
             <span className="text-white font-mono font-medium">
@@ -92,10 +128,11 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
           </div>
         </div>
 
+        {/* Take Profit Slider */}
         <div className="border-t border-white/5 pt-3">
           <div className={enabled ? '' : 'opacity-40 pointer-events-none'}>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-gray-400 text-sm">Target return</span>
+              <span className="text-gray-400 text-sm">Take profit target</span>
               <span className="text-white font-mono font-medium">+{targetPct}%</span>
             </div>
             <input
@@ -108,15 +145,15 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
               className="w-full accent-green-500"
             />
             <div className="flex justify-between text-xs text-gray-600 mt-1">
-              <span>5% (quick exit)</span>
+              <span>5%</span>
               <span>50%</span>
-              <span>100% (hold)</span>
+              <span>100%</span>
             </div>
           </div>
         </div>
 
         <div className="text-xs text-gray-600">
-          Smart Money only. Arbitrage always holds to resolution.
+          Take profit applies to Smart Money only.
         </div>
       </div>
     </div>

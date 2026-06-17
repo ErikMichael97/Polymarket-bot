@@ -22,7 +22,7 @@ import { CTFClient } from './src/clients/ctf-client.js';
 import { startDashboard, dashboardEmitter } from './src/dashboard/index.js';
 import type { BotState, BotConfig, LogLevel, DipArbSignal, SmartMoneySignal } from './src/dashboard/types.js';
 import { addSession, createSessionFromState, type TradeRecord } from './src/dashboard/session-history.js';
-import { isOrderSlice, isWalletRateLimited } from './src/slice-detector.js';
+import { isOrderSlice } from './src/slice-detector.js';
 import { sendDailyDigest } from './src/digest.js';
 import { checkTradeMilestone, isMilestonePaused } from './src/milestone.js';
 import { loadRuntimeConfig, saveRuntimeConfig } from './src/config-store.js';
@@ -78,6 +78,8 @@ let CONFIG = {
     minConsistencyScore: 0.7,  // Recent performance score
     maxSingleTradeExposure: 0.3,  // Max 30% of PnL from one trade
     checkLastNTrades: 10,  // Analyze last 10 trades
+
+    minCopyValueUsd: parseFloat(process.env.MIN_COPY_VALUE_USD || '1000'),
 
     sizeScale: 0.1,
     maxSizePerTrade: 15,  // Up from 10
@@ -441,18 +443,14 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
         if (!CONFIG.smartMoney.enabled) return;
         if (!canTrade()) return;
 
-        // Deduplicate order slices — top wallets split positions into many fills
+        // Deduplicate order slices — top wallets split one position into many fills
         if (isOrderSlice(trade.traderAddress, trade.marketSlug || trade.conditionId || 'unknown')) {
           return;
         }
 
-        // Per-wallet hourly rate limit (default 10 copies/hr, set WALLET_HOURLY_LIMIT in .env)
-        if (isWalletRateLimited(trade.traderAddress)) {
-          return;
-        }
+        const tradeValueUsd = trade.size * trade.price;
 
-        // ... (inside setupSmartMoney callback)
-        // Add to smart money signals for dashboard
+        // Always track in SmartMoney panel so you can see all wallet activity
         const signal: SmartMoneySignal = {
           id: `sm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           timestamp: new Date().toISOString(),
@@ -466,22 +464,22 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
         if (state.smartMoneySignals.length > 50) {
           state.smartMoneySignals = state.smartMoneySignals.slice(0, 50);
         }
+        updateDashboard();
 
-        log('SIGNAL', `Copy trade signal from ${trade.traderAddress.slice(0, 10)}...`, {
+        // Only copy if trade value meets the minimum threshold
+        if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
+
+        log('SIGNAL', `COPY $${tradeValueUsd.toFixed(0)} — ${trade.side} from ${trade.traderAddress.slice(0, 10)}...`, {
           market: trade.marketSlug?.slice(0, 50),
           side: trade.side,
           size: trade.size,
           price: trade.price,
         });
-        updateDashboard();
 
         // EXECUTION LOGIC
         if (CONFIG.dryRun) {
-          // Deduct entry cost from paper balance only — not from P&L.
-          // P&L is only realized on market resolution, which we can't track in dry run.
-          // This keeps risk limits (dailyPnL, totalPnL) unaffected by simulated entries.
           if (state.paper) {
-            state.paper.balance -= trade.size * trade.price;
+            state.paper.balance -= tradeValueUsd;
           }
           simulateTrade(0, 'smartMoney', `Smart Money Copy: ${trade.side} ${trade.size} shares @ ${trade.price}`);
         } else {
@@ -1072,6 +1070,7 @@ async function main() {
       minPnl: CONFIG.smartMoney.minPnl,
       minTrades: CONFIG.smartMoney.minTrades,
       customWallets: CONFIG.smartMoney.customWallets,
+      minCopyValueUsd: CONFIG.smartMoney.minCopyValueUsd,
     },
     arbitrage: {
       enabled: CONFIG.arbitrage.enabled,
@@ -1445,6 +1444,11 @@ async function main() {
         log('INFO', `Trade size updated: ${(CONFIG.capital.maxPerTradePct * 100).toFixed(1)}% per trade`);
       }
 
+      if (key === 'minCopyValue' && typeof value === 'number' && value >= 0) {
+        CONFIG.smartMoney.minCopyValueUsd = value;
+        log('INFO', `Min copy value updated: $${value.toLocaleString()}`);
+      }
+
       if (key === 'addWallet' && typeof value === 'string' && value.startsWith('0x') && value.length === 42) {
         if (!(CONFIG.smartMoney.customWallets as string[]).includes(value)) {
           (CONFIG.smartMoney.customWallets as string[]).push(value);
@@ -1484,6 +1488,7 @@ async function main() {
           minPnl: CONFIG.smartMoney.minPnl,
           minTrades: CONFIG.smartMoney.minTrades,
           customWallets: CONFIG.smartMoney.customWallets,
+          minCopyValueUsd: CONFIG.smartMoney.minCopyValueUsd,
         },
         arbitrage: { enabled: CONFIG.arbitrage.enabled, profitThreshold: CONFIG.arbitrage.profitThreshold, autoExecute: CONFIG.arbitrage.autoExecute },
         dipArb: { enabled: CONFIG.dipArb.enabled, coins: CONFIG.dipArb.coins },
