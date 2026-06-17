@@ -112,6 +112,18 @@ export function startDashboard(port = parseInt(process.env.PORT || '3001', 10)):
       return;
     }
 
+    // Hard reset — deletes state + runtime config files then exits so PM2 restarts clean
+    if (url.pathname === '/api/reset' && req.method === 'POST') {
+      const dataDir = path.resolve(__dirname, '../../data');
+      for (const file of ['bot-state.json', 'runtime-config.json']) {
+        try { fs.unlinkSync(path.join(dataDir, file)); } catch {}
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      setTimeout(() => process.exit(0), 200);
+      return;
+    }
+
     // REST command endpoint — lets Next.js /bot page send commands without WebSocket
     if (url.pathname === '/api/command' && req.method === 'POST') {
       let body = '';
