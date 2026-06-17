@@ -32,6 +32,8 @@ export interface PersistedState {
   paperPnL: number | null;
   paperTrades: number | null;
   paperPositions: unknown[];
+  // Live trading: conditionIds already counted via resolvePosition() — prevents double-counting on restart
+  resolvedLiveConditionIds: string[];
 }
 
 function ensureDataDir() {

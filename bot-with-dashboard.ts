@@ -279,6 +279,7 @@ function persistState() {
       paperPnL: state.paper?.pnl ?? null,
       paperTrades: state.paper?.trades ?? null,
       paperPositions: state.paperPositions ?? [],
+      resolvedLiveConditionIds: [...resolvedLivePositions],
     };
     saveState(ps);
     _persistPending = false;
@@ -1597,7 +1598,11 @@ async function main() {
     if (Array.isArray(saved.paperPositions)) {
       state.paperPositions = saved.paperPositions as typeof state.paperPositions;
     }
-    log('INFO', `♻️ State restored: ${saved.tradesExecuted} trades, P&L $${saved.totalPnL.toFixed(2)}, ${(saved.paperPositions ?? []).length} positions`);
+    // Restore the live-resolution dedup set so portfolio manager doesn't double-count
+    if (Array.isArray(saved.resolvedLiveConditionIds)) {
+      for (const id of saved.resolvedLiveConditionIds) resolvedLivePositions.add(id);
+    }
+    log('INFO', `♻️ State restored: ${saved.tradesExecuted} trades, P&L $${saved.totalPnL.toFixed(2)}, ${(saved.paperPositions ?? []).length} positions, ${resolvedLivePositions.size} resolved live markets`);
   }
 
   // Initialize Paper Wallet if Dry Run
@@ -1638,6 +1643,14 @@ async function main() {
 
   // Setup Portfolio Manager (Persistence)
   await setupPortfolioManager(sdk);
+
+  // Startup reconciliation: check immediately rather than waiting for first 5-min interval.
+  // For dry run: catches paper markets that resolved while bot was down.
+  // For live: portfolio manager already handles this on first 30s sync via resolvedLivePositions.
+  if (CONFIG.dryRun && state.paperPositions && state.paperPositions.some(p => !p.resolved)) {
+    log('INFO', '[Reconcile] Checking open paper positions for resolution since last run...');
+    checkPaperPositionOutcomes(sdk).catch(err => log('WARN', `Startup reconcile error: ${err.message}`));
+  }
 
   // Listen for commands from dashboard
   dashboardEmitter.on('command', async ({ command, payload }: { command: string; payload: any }) => {
