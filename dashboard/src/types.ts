@@ -32,7 +32,8 @@ export interface PaperPosition {
   side: 'BUY' | 'SELL';
   shares: number;
   entryPrice: number;
-  cost: number;
+  signalValue: number;  // original wallet's trade size
+  ourCost: number;      // what we actually deployed from our capital
 }
 
 export interface BotState {
@@ -91,6 +92,14 @@ export interface BotState {
 
   // Portfolio Sync (positions)
   positions?: any[];
+
+  paper?: {
+    balance: number;
+    initialBalance: number;
+    pnl: number;
+    trades: number;
+    totalVolume: number;
+  };
 
   paperPositions?: PaperPosition[];
 

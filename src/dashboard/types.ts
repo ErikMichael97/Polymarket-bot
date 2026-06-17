@@ -126,7 +126,8 @@ export interface PaperPosition {
   side: 'BUY' | 'SELL';
   shares: number;
   entryPrice: number;
-  cost: number;
+  signalValue: number;  // original wallet's trade size
+  ourCost: number;      // what we actually deployed from our capital
 }
 
 export interface BotConfig {

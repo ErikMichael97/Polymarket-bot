@@ -483,10 +483,12 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
 
         // EXECUTION LOGIC
         if (CONFIG.dryRun) {
+          // Our stake is our configured trade size, not the copied wallet's full amount
+          const ourCost = CONFIG.capital.maxPerTradePct * CONFIG.capital.totalUsd;
           if (state.paper) {
-            state.paper.balance -= tradeValueUsd;
+            state.paper.balance = Math.max(0, state.paper.balance - ourCost);
           }
-          // Track as open paper position
+          // Track as open paper position — show both signal size and our stake
           if (!state.paperPositions) state.paperPositions = [];
           state.paperPositions.unshift({
             id: signal.id,
@@ -496,7 +498,8 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
             side: trade.side as 'BUY' | 'SELL',
             shares: trade.size,
             entryPrice: trade.price,
-            cost: tradeValueUsd,
+            signalValue: tradeValueUsd,
+            ourCost,
           });
           if (state.paperPositions.length > 100) state.paperPositions = state.paperPositions.slice(0, 100);
           simulateTrade(0, 'smartMoney', `Smart Money Copy: ${trade.side} ${trade.size} shares @ ${trade.price}`);
@@ -740,8 +743,8 @@ let swapService: SwapService | null = null;
 
 async function updateBalances() {
   if (CONFIG.dryRun) {
-    // SIMULATION: Mock balances based on configured capital
-    state.usdcEBalance = CONFIG.capital.totalUsd + state.totalPnL;
+    // Paper balance tracks remaining capital after copy trade deployments
+    state.usdcEBalance = state.paper?.balance ?? CONFIG.capital.totalUsd;
     state.maticBalance = 1.0;
 
     // Only verify once/log sparsely
