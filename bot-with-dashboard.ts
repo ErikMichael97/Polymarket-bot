@@ -562,7 +562,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           if (state.paperPositions.length > 100) state.paperPositions = state.paperPositions.slice(0, 100);
 
           const pctDisplay = (sizePct * 100).toFixed(1);
-          simulateTrade(0, 'smartMoney', `Smart Money Copy: BUY ${trade.size} shares @ ${trade.price} (${pctDisplay}% = $${ourCost.toFixed(2)})`);
+          log('TRADE', `[SIMULATION] Smart Money Copy: BUY ${trade.size} shares @ ${trade.price} (${pctDisplay}% = $${ourCost.toFixed(2)}) | position opened`);
         } else {
           // LIVE MODE
 
