@@ -29,7 +29,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
   if (_cache) return _cache;
   if (fs.existsSync(CONFIG_PATH)) {
     try {
-      _cache = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) };
+      _cache = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) } as RuntimeConfig;
       return _cache;
     } catch {
       _cache = { ...DEFAULT_CONFIG };

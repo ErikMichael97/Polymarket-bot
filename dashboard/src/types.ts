@@ -29,11 +29,17 @@ export interface PaperPosition {
   timestamp: string;
   wallet: string;
   market: string;
+  conditionId?: string;     // for polling market resolution
+  tokenId?: string;         // specific token bought (YES or NO)
   side: 'BUY' | 'SELL';
   shares: number;
   entryPrice: number;
-  signalValue: number;  // original wallet's trade size
-  ourCost: number;      // what we actually deployed from our capital
+  signalValue: number;      // original wallet's trade size
+  ourCost: number;          // what we actually deployed from our capital
+  resolved?: boolean;
+  outcome?: 'WIN' | 'LOSS';
+  finalProfit?: number;
+  resolvedAt?: string;
 }
 
 export interface BotState {

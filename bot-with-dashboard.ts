@@ -278,6 +278,15 @@ function canTrade(): boolean {
   }
   state.currentDrawdown = (state.peakCapital - state.currentCapital) / state.peakCapital;
 
+  // Check paper balance floor — don't enter new trades if balance can't cover the minimum stake
+  if (CONFIG.dryRun && state.paper) {
+    const minStake = CONFIG.capital.totalUsd * CONFIG.risk.minPositionPct;
+    if (state.paper.balance < minStake) {
+      log('WARN', `Paper balance depleted ($${state.paper.balance.toFixed(2)}). No new trades until positions resolve.`);
+      return false;
+    }
+  }
+
   // Check temporary pause
   if (state.isPaused && Date.now() < state.pauseUntil) return false;
   if (state.isPaused && Date.now() >= state.pauseUntil) {
@@ -483,30 +492,143 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
 
         // EXECUTION LOGIC
         if (CONFIG.dryRun) {
-          // Our stake is our configured trade size, not the copied wallet's full amount
-          const ourCost = CONFIG.capital.maxPerTradePct * CONFIG.capital.totalUsd;
-          if (state.paper) {
-            state.paper.balance = Math.max(0, state.paper.balance - ourCost);
-          }
-          // Track as open paper position — show both signal size and our stake
           if (!state.paperPositions) state.paperPositions = [];
+
+          // --- SELL: close an existing paper position ---
+          if (trade.side === 'SELL') {
+            const condId = (trade as any).conditionId as string | undefined;
+            const matchIdx = state.paperPositions.findIndex(
+              p => !p.resolved && (
+                (condId && p.conditionId === condId) ||
+                p.market === (trade.marketSlug || 'Unknown')
+              )
+            );
+            if (matchIdx >= 0) {
+              const pos = state.paperPositions[matchIdx];
+              // Exit at the signal's current price
+              const shares = pos.ourCost / pos.entryPrice;
+              const exitPrice = trade.price;
+              const profit = (exitPrice - pos.entryPrice) * shares;
+
+              pos.resolved = true;
+              pos.outcome = profit >= 0 ? 'WIN' : 'LOSS';
+              pos.finalProfit = profit;
+              pos.resolvedAt = new Date().toISOString();
+
+              // Return stake + profit to paper balance
+              state.paper!.balance += pos.ourCost + profit;
+              state.paper!.pnl += profit;
+              recordTrade(profit, 'smartMoney');
+              log('TRADE', `[PAPER CLOSED via SELL] ${profit >= 0 ? '✅ WIN' : '❌ LOSS'} | ${pos.market} | ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`);
+            } else {
+              log('SIGNAL', `SELL from ${trade.traderAddress.slice(0, 10)}... — no matching open position on ${trade.marketSlug || 'unknown'}, skipping`);
+            }
+            updateDashboard();
+            return;
+          }
+
+          // --- BUY: open a new paper position with dynamic sizing ---
+          let sizePct = CONFIG.capital.maxPerTradePct;
+          if (CONFIG.risk.enableDynamicSizing) {
+            if (state.consecutiveLosses > 0) {
+              sizePct *= Math.pow(1 - CONFIG.risk.lossSizingReduction, state.consecutiveLosses);
+            } else if (state.consecutiveWins > 0) {
+              sizePct *= Math.pow(1 + CONFIG.risk.winSizingIncrease, state.consecutiveWins);
+            }
+            sizePct = Math.max(CONFIG.risk.minPositionPct, Math.min(CONFIG.risk.maxPositionPct, sizePct));
+          }
+          const ourCost = sizePct * CONFIG.capital.totalUsd;
+
+          state.paper.balance = Math.max(0, state.paper.balance - ourCost);
+
+          const conditionId = (trade as any).conditionId as string | undefined;
+          const tokenId = (trade as any).tokenId as string | undefined;
+
           state.paperPositions.unshift({
             id: signal.id,
             timestamp: new Date().toISOString(),
             wallet: trade.traderAddress,
             market: trade.marketSlug || 'Unknown',
-            side: trade.side as 'BUY' | 'SELL',
+            conditionId,
+            tokenId,
+            side: 'BUY',
             shares: trade.size,
             entryPrice: trade.price,
             signalValue: tradeValueUsd,
             ourCost,
           });
           if (state.paperPositions.length > 100) state.paperPositions = state.paperPositions.slice(0, 100);
-          simulateTrade(0, 'smartMoney', `Smart Money Copy: ${trade.side} ${trade.size} shares @ ${trade.price}`);
+
+          const pctDisplay = (sizePct * 100).toFixed(1);
+          simulateTrade(0, 'smartMoney', `Smart Money Copy: BUY ${trade.size} shares @ ${trade.price} (${pctDisplay}% = $${ourCost.toFixed(2)})`);
         } else {
-          // ... live execution
-          // simplified placeholder from original file
-          // ...
+          // LIVE MODE
+
+          if (trade.side === 'SELL') {
+            // Check if we have a live position on this market to close
+            const condId = (trade as any).conditionId as string | undefined;
+            const matchingPos = state.positions.find(
+              (p: any) => !p.closed && (
+                (condId && p.conditionId === condId) ||
+                p.market === (trade.marketSlug || 'Unknown')
+              )
+            );
+            if (!matchingPos) {
+              log('SIGNAL', `SELL from ${trade.traderAddress.slice(0, 10)}... — no live position to close on ${trade.marketSlug || 'unknown'}, skipping`);
+              return;
+            }
+            // Fall through to close the matching position
+            log('TRADE', `Closing live position on ${trade.marketSlug} (following SELL signal)`);
+            try {
+              const res = await sdk.tradingService.createMarketOrder({
+                tokenId: matchingPos.asset,
+                side: 'SELL',
+                amount: matchingPos.size,
+              });
+              if (res.success) {
+                log('TRADE', `✅ Live position closed: ${matchingPos.size} shares`);
+              } else {
+                log('WARN', `❌ Close failed: ${res.errorMsg}`);
+              }
+            } catch (err: any) {
+              log('WARN', `❌ Close error: ${err.message}`);
+            }
+            return;
+          }
+
+          // BUY — live execution with dynamic sizing
+          let sizePct = CONFIG.capital.maxPerTradePct;
+          if (CONFIG.risk.enableDynamicSizing) {
+            if (state.consecutiveLosses > 0) {
+              sizePct *= Math.pow(1 - CONFIG.risk.lossSizingReduction, state.consecutiveLosses);
+            } else if (state.consecutiveWins > 0) {
+              sizePct *= Math.pow(1 + CONFIG.risk.winSizingIncrease, state.consecutiveWins);
+            }
+            sizePct = Math.max(CONFIG.risk.minPositionPct, Math.min(CONFIG.risk.maxPositionPct, sizePct));
+          }
+          const ourCost = sizePct * CONFIG.capital.totalUsd;
+
+          const tokenId = (trade as any).tokenId as string | undefined;
+          if (!tokenId) {
+            log('WARN', `No tokenId on trade signal for ${trade.marketSlug}, skipping live execution`);
+            return;
+          }
+
+          try {
+            const res = await sdk.tradingService.createMarketOrder({
+              tokenId,
+              side: 'BUY',
+              amount: ourCost,
+            });
+            if (res.success) {
+              log('TRADE', `✅ Live copy: BUY $${ourCost.toFixed(2)} on ${trade.marketSlug} @ ~${trade.price}`);
+              recordTrade(0, 'smartMoney');
+            } else {
+              log('WARN', `❌ Live copy failed: ${res.errorMsg}`);
+            }
+          } catch (err: any) {
+            log('WARN', `❌ Live copy error: ${err.message}`);
+          }
         }
       });
   }
@@ -984,6 +1106,64 @@ async function setupDirectTrading(sdk: PolymarketSDK) {
   setTimeout(checkTrendTrades, 10000);
 }
 
+// Polls Polymarket to see if any open paper positions have resolved, then records real P&L.
+// Runs every 5 minutes. Required because paper trades enter at $0 profit and we only
+// know the real outcome once the market closes and a winner is declared.
+async function checkPaperPositionOutcomes(sdk: PolymarketSDK) {
+  if (!state.paperPositions || state.paperPositions.length === 0) return;
+  const openPositions = state.paperPositions.filter(p => !p.resolved && p.conditionId);
+  if (openPositions.length === 0) return;
+
+  for (const pos of openPositions) {
+    try {
+      const market = await sdk.markets.getMarket(pos.conditionId!);
+      if (!market || !market.closed) continue;
+
+      // Market resolved — determine if we won
+      let weWon = false;
+      if (pos.tokenId) {
+        // We stored the exact token being bought — most accurate path
+        const token = market.tokens.find((t: any) => t.tokenId === pos.tokenId);
+        weWon = token?.winner === true;
+      } else {
+        // Fallback: infer from entry price. A high entry price (>0.5) means the wallet
+        // was buying the leading/favoured outcome (usually YES). This is imperfect but
+        // workable until tokenId is reliably available from the SDK.
+        const yesToken = market.tokens.find((t: any) => t.outcome?.toLowerCase() === 'yes');
+        weWon = pos.entryPrice >= 0.5
+          ? yesToken?.winner === true
+          : yesToken?.winner === false;
+      }
+
+      const shares = pos.ourCost / pos.entryPrice;
+      // WIN: receive shares * $1 payout, minus what we paid = shares * (1 - entryPrice)
+      // LOSS: lose the full stake
+      const profit = weWon
+        ? shares * (1 - pos.entryPrice)
+        : -pos.ourCost;
+
+      pos.resolved = true;
+      pos.outcome = weWon ? 'WIN' : 'LOSS';
+      pos.finalProfit = profit;
+      pos.resolvedAt = new Date().toISOString();
+
+      // Return cost + profit to paper balance
+      state.paper!.balance += pos.ourCost + profit;
+      state.paper!.pnl += profit;
+      recordTrade(profit, 'smartMoney');
+
+      log('TRADE', `[PAPER RESOLVED] ${weWon ? '✅ WIN' : '❌ LOSS'} | ${pos.market} | ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`);
+    } catch {
+      // Market not found or API error — will retry on next interval
+    }
+  }
+  updateDashboard();
+}
+
+// Tracks live position conditionIds we've already recorded as resolved,
+// so we don't double-count across 30-second syncs.
+const resolvedLivePositions = new Set<string>();
+
 async function setupPortfolioManager(sdk: PolymarketSDK) {
   log('INFO', 'Starting Portfolio Manager...');
 
@@ -1020,9 +1200,18 @@ async function setupPortfolioManager(sdk: PolymarketSDK) {
               pos.curPrice = token.price || 0;
             }
 
-            // If market is closed but winner info is missing/false, assume lost unless proven otherwise
-            if (market.closed && !pos.isWinner) {
-              // Double check if ANY token won (if market resolved)
+            // Record realized P&L for live positions when their market resolves
+            if (market.closed && !resolvedLivePositions.has(pos.conditionId)) {
+              resolvedLivePositions.add(pos.conditionId);
+              const entry = Number(pos.avgPrice) || 0;
+              const size = Number(pos.size) || 0;
+              if (entry > 0 && size > 0) {
+                const profit = pos.isWinner
+                  ? size * (1 - entry)   // WIN: size * remaining payout
+                  : -(size * entry);     // LOSS: lose the entry cost
+                recordTrade(profit, 'smartMoney');
+                log('TRADE', `[LIVE RESOLVED] ${pos.isWinner ? '✅ WIN' : '❌ LOSS'} | ${pos.conditionId?.slice(0, 12)}... | ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`);
+              }
             }
           }
         } catch (e) {
@@ -1055,6 +1244,9 @@ async function setupPortfolioManager(sdk: PolymarketSDK) {
       log('WARN', `Portfolio sync error: ${err.message}`);
     }
   }, 30 * 1000);
+
+  // Poll paper position outcomes every 5 minutes (markets don't resolve instantly)
+  setInterval(() => checkPaperPositionOutcomes(sdk).catch(() => {}), 5 * 60 * 1000);
 }
 
 async function main() {
