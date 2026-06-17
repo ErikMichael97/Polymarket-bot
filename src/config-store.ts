@@ -19,6 +19,7 @@ export interface RuntimeConfig {
     targetPct: number;
   };
   largeSellThresholdUsd: number;
+  minCopyValueUsd: number;
   botPaused: boolean;
   customWallets: string[];
 }
@@ -27,6 +28,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   takeProfit: { enabled: true, targetPct: 20, applyToStrategies: ['smartMoney'] },
   stopLoss: { enabled: true, targetPct: 30 },
   largeSellThresholdUsd: 5000,
+  minCopyValueUsd: 10000,
   botPaused: false,
   customWallets: [],
 };

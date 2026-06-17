@@ -1483,6 +1483,9 @@ async function main() {
   if (runtimeConfig.largeSellThresholdUsd !== undefined) {
     CONFIG.smartMoney.largeSellThresholdUsd = runtimeConfig.largeSellThresholdUsd;
   }
+  if (runtimeConfig.minCopyValueUsd !== undefined) {
+    CONFIG.smartMoney.minCopyValueUsd = runtimeConfig.minCopyValueUsd;
+  }
   if (runtimeConfig.botPaused) {
     log('WARN', `Bot starting in PAUSED state (milestone reached). Resume via dashboard.`);
   }
@@ -1939,6 +1942,8 @@ async function main() {
       if (key === 'minCopyValue' && typeof value === 'number' && value >= 0) {
         CONFIG.smartMoney.minCopyValueUsd = value;
         log('INFO', `Min copy value updated: $${value.toLocaleString()}`);
+        const current = loadRuntimeConfig();
+        saveRuntimeConfig({ ...current, minCopyValueUsd: value });
       }
 
       if (key === 'addWallet' && typeof value === 'string' && value.startsWith('0x') && value.length === 42) {
@@ -2001,6 +2006,50 @@ async function main() {
         log('INFO', '▶️ Bot resumed after milestone pause');
       }
 
+      broadcastConfig();
+    }
+
+    if (command === 'reset') {
+      // Wipe persisted state file
+      deletePersistedState();
+      // Clear pause flag in runtime config while keeping all other settings
+      const rc = loadRuntimeConfig();
+      saveRuntimeConfig({ ...rc, botPaused: false });
+      milestonePauseLogged = false;
+
+      // Reset all in-memory counters and paper wallet
+      state.totalPnL = 0;
+      state.dailyPnL = 0;
+      state.monthlyPnL = 0;
+      state.tradesExecuted = 0;
+      state.wins = 0;
+      state.losses = 0;
+      state.consecutiveLosses = 0;
+      state.consecutiveWins = 0;
+      state.smartMoneyTrades = 0;
+      state.arbTrades = 0;
+      state.dipArbTrades = 0;
+      state.directTrades = 0;
+      state.arbProfit = 0;
+      state.permanentlyHalted = false;
+      state.isPaused = false;
+      state.pauseUntil = 0;
+      state.peakCapital = CONFIG.capital.totalUsd;
+      state.currentCapital = CONFIG.capital.totalUsd;
+      state.currentDrawdown = 0;
+      state.paperPositions = [];
+      if (state.paper) {
+        state.paper = {
+          balance: CONFIG.capital.totalUsd,
+          initialBalance: CONFIG.capital.totalUsd,
+          pnl: 0,
+          trades: 0,
+          totalVolume: 0,
+        };
+      }
+
+      log('INFO', '♻️ Bot reset via dashboard — fresh start');
+      updateDashboard();
       broadcastConfig();
     }
   });

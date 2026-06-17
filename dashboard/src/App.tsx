@@ -42,7 +42,11 @@ function App() {
   };
 
   const handleUpdateConfig = (key: string, value: unknown) => {
-    sendCommand('updateConfig', { key, value });
+    if (key === '__reset__') {
+      sendCommand('reset', {});
+    } else {
+      sendCommand('updateConfig', { key, value });
+    }
   };
 
   const handleToggleDryRun = () => {

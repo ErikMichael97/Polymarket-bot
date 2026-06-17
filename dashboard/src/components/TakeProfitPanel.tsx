@@ -77,6 +77,12 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
     }
   };
 
+  const handleReset = () => {
+    if (window.confirm('Reset bot?\n\nThis will wipe all P&L, trade history, paper positions, and restart the paper wallet. Your settings (TP, SL, min copy value) will be kept.\n\nThis cannot be undone.')) {
+      onUpdateConfig('__reset__', true);
+    }
+  };
+
   return (
     <div className="panel">
       <div className="panel-header">
@@ -243,6 +249,16 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
 
         <div className="text-xs text-gray-600">
           TP/SL checked every 5 min via market price polling.
+        </div>
+
+        <div className="border-t border-white/5 pt-3">
+          <button
+            onClick={handleReset}
+            className="w-full py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-medium hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
+          >
+            Reset Bot
+          </button>
+          <div className="text-xs text-gray-600 mt-1 text-center">Wipes P&L, trades, and positions. Settings kept.</div>
         </div>
       </div>
     </div>
