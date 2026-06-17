@@ -487,6 +487,13 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
         // Only copy if trade value meets the minimum threshold
         if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
 
+        // Skip sub-5% probability bets — longshots skew P&L and are unreliable signals
+        const MIN_ENTRY_PRICE = 0.05;
+        if (trade.price < MIN_ENTRY_PRICE || trade.price > (1 - MIN_ENTRY_PRICE)) {
+          log('SIGNAL', `Skipping longshot: ${trade.side} @ ${trade.price.toFixed(3)} (outside 5%-95% range)`);
+          return;
+        }
+
         log('SIGNAL', `COPY $${tradeValueUsd.toFixed(0)} — ${trade.side} from ${trade.traderAddress.slice(0, 10)}...`, {
           market: trade.marketSlug?.slice(0, 50),
           side: trade.side,
@@ -541,8 +548,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
             }
             sizePct = Math.max(CONFIG.risk.minPositionPct, Math.min(CONFIG.risk.maxPositionPct, sizePct));
           }
-          const currentCapital = CONFIG.capital.totalUsd + state.totalPnL;
-          const ourCost = sizePct * currentCapital;
+          const ourCost = sizePct * CONFIG.capital.totalUsd;
 
           state.paper.balance = Math.max(0, state.paper.balance - ourCost);
 
@@ -611,8 +617,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
             }
             sizePct = Math.max(CONFIG.risk.minPositionPct, Math.min(CONFIG.risk.maxPositionPct, sizePct));
           }
-          const currentCapital = CONFIG.capital.totalUsd + state.totalPnL;
-          const ourCost = sizePct * currentCapital;
+          const ourCost = sizePct * CONFIG.capital.totalUsd;
 
           const tokenId = (trade as any).tokenId as string | undefined;
           if (!tokenId) {
