@@ -81,6 +81,8 @@ let CONFIG = {
     checkLastNTrades: 10,  // Analyze last 10 trades
 
     minCopyValueUsd: parseFloat(process.env.MIN_COPY_VALUE_USD || '1000'),
+    stopLossPct: 30,
+    largeSellThresholdUsd: 5000,
 
     sizeScale: 0.1,
     maxSizePerTrade: 15,  // Up from 10
@@ -297,6 +299,7 @@ function broadcastConfig() {
       minTrades: CONFIG.smartMoney.minTrades,
       customWallets: CONFIG.smartMoney.customWallets,
       minCopyValueUsd: CONFIG.smartMoney.minCopyValueUsd,
+      largeSellThresholdUsd: CONFIG.smartMoney.largeSellThresholdUsd,
     },
     arbitrage: {
       enabled: CONFIG.arbitrage.enabled,
@@ -310,6 +313,10 @@ function broadcastConfig() {
     takeProfit: {
       enabled: runtimeCfg.takeProfit.enabled,
       targetPct: runtimeCfg.takeProfit.targetPct,
+    },
+    stopLoss: {
+      enabled: runtimeCfg.stopLoss?.enabled ?? true,
+      targetPct: runtimeCfg.stopLoss?.targetPct ?? CONFIG.smartMoney.stopLossPct,
     },
     botPaused: runtimeCfg.botPaused,
   });
@@ -498,199 +505,81 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
   if (isSmartMoneyInitialized || isSmartMoneyInitializing) return;
   isSmartMoneyInitializing = true;
 
-  log('WALLET', 'Setting up Smart Money with quality filtering...');
+  log('WALLET', `Large Trade Copy active — copying any BUY ≥ $${CONFIG.smartMoney.minCopyValueUsd}`);
 
-  const qualified: string[] = [];
-
+  // Custom wallets are tracked for SELL exit signals
+  const tracked: string[] = [];
   if (CONFIG.smartMoney.customWallets?.length > 0) {
     for (const wallet of CONFIG.smartMoney.customWallets) {
-      qualified.push(wallet);
-      log('WALLET', `⭐ Custom wallet added: ${wallet.slice(0, 10)}...`);
+      tracked.push(wallet);
+      log('WALLET', `⭐ Custom wallet tracked: ${wallet.slice(0, 10)}...`);
     }
   }
 
-  try {
-    const leaderboard = await sdk.wallets.getLeaderboardByPeriod('week', CONFIG.smartMoney.topN * 2, 'pnl');
-
-    for (const entry of leaderboard) {
-      // Check if disabled mid-process to abort early
-      if (!CONFIG.smartMoney.enabled && qualified.length === 0) break;
-
-      if (qualified.length >= CONFIG.smartMoney.topN) break;
-      if (qualified.includes(entry.address)) continue;
-
-      const profile = await sdk.wallets.getWalletProfile(entry.address);
-      if (!profile) continue;
-
-      const winRate = (profile as any).winRate ?? 0;
-      const pnl = entry.pnl ?? 0;
-      const trades = profile.tradeCount ?? 0;
-
-      if (winRate >= CONFIG.smartMoney.minWinRate &&
-        pnl >= CONFIG.smartMoney.minPnl &&
-        trades >= CONFIG.smartMoney.minTrades) {
-        qualified.push(entry.address);
-        log('WALLET', `✅ Qualified: ${entry.address.slice(0, 10)}... (WR:${(winRate * 100).toFixed(0)}% PnL:$${pnl.toFixed(0)} T:${trades})`);
-      }
-
-      await new Promise(r => setTimeout(r, 300));
-    }
-  } catch (err) {
-    log('WARN', `Leaderboard error: ${(err as Error).message}`);
-  }
-
-  // Always keep wallets that have open positions, even if they've dropped off the leaderboard.
-  // Without this, their SELL signals would be ignored and positions would never close via signal.
+  // Retain wallets from open positions so their SELL signals close our trades
   const openPositionWallets = (state.paperPositions ?? [])
     .filter(p => !p.resolved)
     .map(p => p.wallet.toLowerCase());
   for (const wallet of openPositionWallets) {
-    if (!qualified.some(q => q.toLowerCase() === wallet)) {
-      qualified.push(wallet);
-      log('WALLET', `📌 Retained ${wallet.slice(0, 10)}... — has open position, not on current leaderboard`);
+    if (!tracked.some(q => q.toLowerCase() === wallet)) {
+      tracked.push(wallet);
+      log('WALLET', `📌 Retained ${wallet.slice(0, 10)}... — has open position`);
     }
   }
 
-  state.followedWallets = qualified;
-  log('WALLET', `Following ${qualified.length} wallets:`);
-  for (const w of qualified) log('WALLET', `  → ${w}`);
+  state.followedWallets = tracked;
   updateDashboard();
 
-  if (qualified.length > 0) {
-    // Subscribe to smart money trades with address filter
-    sdk.smartMoney.subscribeSmartMoneyTrades(
-      async (trade: SmartMoneyTrade) => {
-        if (!CONFIG.smartMoney.enabled) return;
-        lastSmartMoneyActivityMs = Date.now(); // heartbeat — watchdog uses this to detect dead feed
+  // Subscribe to ALL Polymarket activity — no wallet filter, size threshold applied in handler
+  sdk.smartMoney.subscribeSmartMoneyTrades(
+    async (trade: SmartMoneyTrade) => {
+      if (!CONFIG.smartMoney.enabled) return;
+      lastSmartMoneyActivityMs = Date.now();
 
-        // Deduplicate order slices — top wallets split one position into many fills
-        if (isOrderSlice(trade.traderAddress, trade.marketSlug || trade.conditionId || 'unknown')) {
+      // Deduplicate order slices
+      if (isOrderSlice(trade.traderAddress, trade.marketSlug || trade.conditionId || 'unknown')) return;
+
+      const tradeValueUsd = trade.size * trade.price;
+      if (!trade.size || tradeValueUsd === 0) return;
+
+      const isSell = trade.side === 'SELL';
+      const traderLower = trade.traderAddress.toLowerCase();
+      const condId = (trade as any).conditionId as string | undefined;
+
+      if (!isSell) {
+        // BUY — copy any trade at or above the threshold
+        if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
+
+        const signal: SmartMoneySignal = {
+          id: `sm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          timestamp: new Date().toISOString(),
+          wallet: trade.traderAddress,
+          market: trade.marketSlug || 'Unknown',
+          side: 'BUY',
+          size: trade.size,
+          price: trade.price,
+        };
+        state.smartMoneySignals.unshift(signal);
+        if (state.smartMoneySignals.length > 50) state.smartMoneySignals = state.smartMoneySignals.slice(0, 50);
+        updateDashboard();
+
+        log('SIGNAL', `[LargeTrade] ${traderLower.slice(0, 10)}... BUY $${tradeValueUsd.toFixed(0)} @ ${trade.price.toFixed(3)} on ${trade.marketSlug}`);
+
+        if (!canTrade()) return;
+        if (trade.price < 0.05) {
+          log('SIGNAL', `Skipping longshot: BUY @ ${trade.price.toFixed(3)} (< 5%)`);
           return;
         }
 
-        const tradeValueUsd = trade.size * trade.price;
-
-        // Drop malformed events from the feed
-        if (!trade.size || tradeValueUsd === 0) return;
-
-        const isSell = trade.side === 'SELL';
-        const traderLower = trade.traderAddress.toLowerCase();
-        const isFollowedWallet = state.followedWallets.some(w => w.toLowerCase() === traderLower);
-
-        if (!isSell) {
-          // BUY: only copy from wallets we're actively following
-          if (!isFollowedWallet) {
-            if (state.followedWallets.length === 0) {
-              log('WARN', `[WalletFilter] BUY dropped — followed wallet list is still empty (leaderboard still loading?)`);
-            }
-            // Diagnostic: periodically log large trades so we can verify addresses coming through the feed
-            if (tradeValueUsd >= 1000 && Date.now() - _lastFeedDiagMs > 30_000) {
-              _lastFeedDiagMs = Date.now();
-              log('SIGNAL', `[FeedDiag] Large BUY from non-followed wallet: ${traderLower.slice(0, 14)}... $${tradeValueUsd.toFixed(0)}`);
-            }
-            return;
-          }
-
-          // Followed wallet confirmed — record signal immediately so the panel shows it
-          // even if we skip the copy due to pause/size/price filters below
-          const signal: SmartMoneySignal = {
-            id: `sm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            timestamp: new Date().toISOString(),
-            wallet: trade.traderAddress,
-            market: trade.marketSlug || 'Unknown',
-            side: trade.side as 'BUY' | 'SELL',
-            size: trade.size,
-            price: trade.price,
-          };
-          state.smartMoneySignals.unshift(signal);
-          if (state.smartMoneySignals.length > 50) state.smartMoneySignals = state.smartMoneySignals.slice(0, 50);
-          updateDashboard();
-
-          log('SIGNAL', `[FollowedWallet] ${traderLower.slice(0, 10)}... BUY $${tradeValueUsd.toFixed(0)} @ ${trade.price.toFixed(3)} on ${trade.marketSlug}`);
-          if (!canTrade()) return;
-          if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) {
-            log('SIGNAL', `[WalletFilter] Skipping copy — $${tradeValueUsd.toFixed(0)} below min $${CONFIG.smartMoney.minCopyValueUsd}`);
-            return;
-          }
-          if (trade.price < 0.05) {
-            log('SIGNAL', `Skipping longshot: BUY @ ${trade.price.toFixed(3)} (< 5% probability)`);
-            return;
-          }
-        } else {
-          // SELL: only close positions opened by this same wallet
-          const condId = (trade as any).conditionId as string | undefined;
-          const hasOurPosition = (state.paperPositions ?? []).some(
-            p => !p.resolved &&
-              p.wallet.toLowerCase() === traderLower &&
-              ((condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown'))
-          ) || state.positions.some(
-            (p: any) => !p.closed &&
-              ((condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown'))
-          );
-          if (!hasOurPosition) return;
-
-          // Followed wallet exit — record signal
-          const signal: SmartMoneySignal = {
-            id: `sm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            timestamp: new Date().toISOString(),
-            wallet: trade.traderAddress,
-            market: trade.marketSlug || 'Unknown',
-            side: 'SELL',
-            size: trade.size,
-            price: trade.price,
-          };
-          state.smartMoneySignals.unshift(signal);
-          if (state.smartMoneySignals.length > 50) state.smartMoneySignals = state.smartMoneySignals.slice(0, 50);
-          updateDashboard();
-        }
-
-        log('SIGNAL', `COPY $${tradeValueUsd.toFixed(0)} — ${trade.side} from ${trade.traderAddress.slice(0, 10)}...`, {
+        log('SIGNAL', `COPY $${tradeValueUsd.toFixed(0)} — BUY from ${trade.traderAddress.slice(0, 10)}...`, {
           market: trade.marketSlug?.slice(0, 50),
-          side: trade.side,
           size: trade.size,
           price: trade.price,
         });
 
-        // EXECUTION LOGIC
         if (CONFIG.dryRun) {
           if (!state.paperPositions) state.paperPositions = [];
 
-          // --- SELL: close the position opened by this specific wallet ---
-          if (trade.side === 'SELL') {
-            const condId = (trade as any).conditionId as string | undefined;
-            const matchIdx = state.paperPositions.findIndex(
-              p => !p.resolved &&
-                p.wallet.toLowerCase() === traderLower &&
-                (
-                  (condId && p.conditionId === condId) ||
-                  p.market === (trade.marketSlug || 'Unknown')
-                )
-            );
-            if (matchIdx >= 0) {
-              const pos = state.paperPositions[matchIdx];
-              // Exit at the signal's current price
-              const shares = pos.ourCost / pos.entryPrice;
-              const exitPrice = trade.price;
-              const profit = (exitPrice - pos.entryPrice) * shares;
-
-              pos.resolved = true;
-              pos.outcome = profit > 0 ? 'WIN' : 'LOSS';
-              pos.finalProfit = profit;
-              pos.resolvedAt = new Date().toISOString();
-
-              // Return stake + profit to paper balance
-              state.paper!.balance += pos.ourCost + profit;
-              state.paper!.pnl += profit;
-              resolvePosition(profit);
-              log('TRADE', `[PAPER CLOSED via SELL] ${profit >= 0 ? '✅ WIN' : '❌ LOSS'} | ${pos.market} | ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`);
-            } else {
-              log('SIGNAL', `SELL from ${trade.traderAddress.slice(0, 10)}... — no matching open position on ${trade.marketSlug || 'unknown'}, skipping`);
-            }
-            updateDashboard();
-            return;
-          }
-
-          // --- BUY: open a new paper position with dynamic sizing ---
           let sizePct = CONFIG.capital.maxPerTradePct;
           if (CONFIG.risk.enableDynamicSizing) {
             if (state.consecutiveLosses > 0) {
@@ -702,9 +591,8 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           }
           const ourCost = sizePct * CONFIG.capital.totalUsd;
 
-          state.paper.balance -= ourCost;
+          state.paper!.balance -= ourCost;
 
-          const conditionId = (trade as any).conditionId as string | undefined;
           const tokenId = (trade as any).tokenId as string | undefined;
 
           state.paperPositions.unshift({
@@ -712,7 +600,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
             timestamp: new Date().toISOString(),
             wallet: trade.traderAddress,
             market: trade.marketSlug || 'Unknown',
-            conditionId,
+            conditionId: condId,
             tokenId,
             side: 'BUY',
             shares: trade.size,
@@ -723,44 +611,10 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           if (state.paperPositions.length > 500) state.paperPositions = state.paperPositions.slice(0, 500);
 
           const pctDisplay = (sizePct * 100).toFixed(1);
-          log('TRADE', `[SIMULATION] Smart Money Copy: BUY ${trade.size} shares @ ${trade.price} (${pctDisplay}% = $${ourCost.toFixed(2)}) | position opened`);
-          recordTrade(0, 'smartMoney'); // count entry for milestone + session summary
+          log('TRADE', `[SIMULATION] Large Trade Copy: BUY ${trade.size} shares @ ${trade.price} (${pctDisplay}% = $${ourCost.toFixed(2)}) | position opened`);
+          recordTrade(0, 'smartMoney');
         } else {
-          // LIVE MODE
-
-          if (trade.side === 'SELL') {
-            // Check if we have a live position on this market to close
-            const condId = (trade as any).conditionId as string | undefined;
-            const matchingPos = state.positions.find(
-              (p: any) => !p.closed && (
-                (condId && p.conditionId === condId) ||
-                p.market === (trade.marketSlug || 'Unknown')
-              )
-            );
-            if (!matchingPos) {
-              log('SIGNAL', `SELL from ${trade.traderAddress.slice(0, 10)}... — no live position to close on ${trade.marketSlug || 'unknown'}, skipping`);
-              return;
-            }
-            // Fall through to close the matching position
-            log('TRADE', `Closing live position on ${trade.marketSlug} (following SELL signal)`);
-            try {
-              const res = await sdk.tradingService.createMarketOrder({
-                tokenId: matchingPos.asset,
-                side: 'SELL',
-                amount: matchingPos.size,
-              });
-              if (res.success) {
-                log('TRADE', `✅ Live position closed: ${matchingPos.size} shares`);
-              } else {
-                log('WARN', `❌ Close failed: ${res.errorMsg}`);
-              }
-            } catch (err: any) {
-              log('WARN', `❌ Close error: ${err.message}`);
-            }
-            return;
-          }
-
-          // BUY — live execution with dynamic sizing
+          // LIVE BUY
           let sizePct = CONFIG.capital.maxPerTradePct;
           if (CONFIG.risk.enableDynamicSizing) {
             if (state.consecutiveLosses > 0) {
@@ -794,8 +648,119 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
             log('WARN', `❌ Live copy error: ${err.message}`);
           }
         }
-      });
-  }
+      } else {
+        // SELL — two exit triggers:
+
+        // 1. The wallet we originally copied exits their position (paper: wallet match; live: market match)
+        const originalWalletExit = (state.paperPositions ?? []).some(
+          p => !p.resolved &&
+            p.wallet.toLowerCase() === traderLower &&
+            ((condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown'))
+        ) || state.positions.some(
+          (p: any) => !p.closed &&
+            ((condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown'))
+        );
+
+        // 2. Any wallet makes a very large SELL on a market we hold
+        const largePanicSell = tradeValueUsd >= CONFIG.smartMoney.largeSellThresholdUsd && (
+          (state.paperPositions ?? []).some(
+            p => !p.resolved &&
+              ((condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown'))
+          ) || state.positions.some(
+            (p: any) => !p.closed &&
+              ((condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown'))
+          )
+        );
+
+        if (!originalWalletExit && !largePanicSell) return;
+
+        const exitReason = largePanicSell && !originalWalletExit
+          ? `panic sell $${tradeValueUsd.toFixed(0)} by ${traderLower.slice(0, 10)}...`
+          : 'original wallet exit';
+
+        const signal: SmartMoneySignal = {
+          id: `sm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          timestamp: new Date().toISOString(),
+          wallet: trade.traderAddress,
+          market: trade.marketSlug || 'Unknown',
+          side: 'SELL',
+          size: trade.size,
+          price: trade.price,
+        };
+        state.smartMoneySignals.unshift(signal);
+        if (state.smartMoneySignals.length > 50) state.smartMoneySignals = state.smartMoneySignals.slice(0, 50);
+        updateDashboard();
+
+        log('SIGNAL', `[Exit - ${exitReason}] on ${trade.marketSlug || 'unknown'}`);
+
+        if (CONFIG.dryRun) {
+          if (!state.paperPositions) { updateDashboard(); return; }
+
+          // Match: original wallet SELL matches by wallet+market; panic sell matches by market only
+          const matchFn = (p: any): boolean => {
+            if (p.resolved) return false;
+            const marketMatch = (condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown');
+            if (!marketMatch) return false;
+            if (originalWalletExit && p.wallet.toLowerCase() === traderLower) return true;
+            if (largePanicSell) return true;
+            return false;
+          };
+
+          let closedAny = false;
+          for (const pos of state.paperPositions) {
+            if (!matchFn(pos)) continue;
+            const shares = pos.ourCost / pos.entryPrice;
+            const profit = (trade.price - pos.entryPrice) * shares;
+
+            pos.resolved = true;
+            pos.outcome = profit > 0 ? 'WIN' : 'LOSS';
+            pos.finalProfit = profit;
+            pos.resolvedAt = new Date().toISOString();
+
+            state.paper!.balance += pos.ourCost + profit;
+            state.paper!.pnl += profit;
+            resolvePosition(profit);
+            closedAny = true;
+            log('TRADE', `[PAPER CLOSED - ${exitReason}] ${profit >= 0 ? '✅ WIN' : '❌ LOSS'} | ${pos.market} | ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`);
+          }
+
+          if (!closedAny) {
+            log('SIGNAL', `Exit trigger — no matching paper position on ${trade.marketSlug || 'unknown'}`);
+          }
+          updateDashboard();
+        } else {
+          // LIVE SELL — close matching position
+          const matchingPos = state.positions.find(
+            (p: any) => !p.closed && (
+              (condId && p.conditionId === condId) || p.market === (trade.marketSlug || 'Unknown')
+            )
+          );
+
+          if (!matchingPos) {
+            log('SIGNAL', `Exit trigger — no live position to close on ${trade.marketSlug || 'unknown'}`);
+            return;
+          }
+
+          log('TRADE', `Closing live position (${exitReason}) on ${trade.marketSlug}`);
+          try {
+            const res = await sdk.tradingService.createMarketOrder({
+              tokenId: matchingPos.asset,
+              side: 'SELL',
+              amount: matchingPos.size,
+            });
+            if (res.success) {
+              log('TRADE', `✅ Live position closed: ${matchingPos.size} shares`);
+            } else {
+              log('WARN', `❌ Close failed: ${res.errorMsg}`);
+            }
+          } catch (err: any) {
+            log('WARN', `❌ Close error: ${err.message}`);
+          }
+        }
+      }
+    }
+  );
+
   isSmartMoneyInitialized = true;
   isSmartMoneyInitializing = false;
 }
@@ -1359,14 +1324,16 @@ async function checkTakeProfitTargets(sdk: PolymarketSDK) {
       if (currentPrice === null || currentPrice <= 0) continue;
 
       const returnPct = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
-      if (returnPct < targetPct) continue;
+      const slCfg = rtConfig.stopLoss;
+      const isTakeProfit = returnPct >= targetPct;
+      const isStopLoss = (slCfg?.enabled ?? true) && returnPct <= -(slCfg?.targetPct ?? CONFIG.smartMoney.stopLossPct);
+      if (!isTakeProfit && !isStopLoss) continue;
 
-      // Hit take-profit — close the position
       const shares = pos.ourCost / pos.entryPrice;
       const profit = (currentPrice - pos.entryPrice) * shares;
 
       pos.resolved = true;
-      pos.outcome = 'WIN';
+      pos.outcome = isTakeProfit ? 'WIN' : 'LOSS';
       pos.finalProfit = profit;
       pos.resolvedAt = new Date().toISOString();
 
@@ -1374,7 +1341,11 @@ async function checkTakeProfitTargets(sdk: PolymarketSDK) {
       state.paper!.pnl += profit;
       resolvePosition(profit);
 
-      log('TRADE', `[TAKE PROFIT] ✅ ${pos.market} | +${returnPct.toFixed(1)}% hit target ${targetPct}% | +$${profit.toFixed(2)}`);
+      if (isTakeProfit) {
+        log('TRADE', `[TAKE PROFIT] ✅ ${pos.market} | +${returnPct.toFixed(1)}% hit target ${targetPct}% | +$${profit.toFixed(2)}`);
+      } else {
+        log('TRADE', `[STOP LOSS] ❌ ${pos.market} | ${returnPct.toFixed(1)}% hit stop ${slCfg?.targetPct ?? CONFIG.smartMoney.stopLossPct}% | $${profit.toFixed(2)}`);
+      }
     } catch {
       // Market fetch failed — skip, retry next interval
     }
@@ -1475,7 +1446,7 @@ async function setupPortfolioManager(sdk: PolymarketSDK) {
     // Watchdog: if Smart Money feed has been silent for 10+ minutes, force reconnect.
     // Polymarket has continuous global activity — 10min of total silence = dead subscription.
     const silentMs = Date.now() - lastSmartMoneyActivityMs;
-    if (CONFIG.smartMoney.enabled && silentMs > 10 * 60 * 1000 && state.followedWallets.length > 0) {
+    if (CONFIG.smartMoney.enabled && isSmartMoneyInitialized && silentMs > 10 * 60 * 1000) {
       log('WARN', `[WATCHDOG] Smart Money feed silent for ${Math.round(silentMs / 60000)}min — forcing reconnect`);
       try { sdk.smartMoney.disconnect(); } catch {}
       isSmartMoneyInitialized = false;
@@ -1496,6 +1467,12 @@ async function main() {
   const runtimeConfig = loadRuntimeConfig();
   (CONFIG as any).takeProfitEnabled = runtimeConfig.takeProfit.enabled;
   (CONFIG as any).takeProfitPct = runtimeConfig.takeProfit.targetPct;
+  if (runtimeConfig.stopLoss) {
+    CONFIG.smartMoney.stopLossPct = runtimeConfig.stopLoss.targetPct;
+  }
+  if (runtimeConfig.largeSellThresholdUsd !== undefined) {
+    CONFIG.smartMoney.largeSellThresholdUsd = runtimeConfig.largeSellThresholdUsd;
+  }
   if (runtimeConfig.botPaused) {
     log('WARN', `Bot starting in PAUSED state (milestone reached). Resume via dashboard.`);
   }
@@ -1530,6 +1507,7 @@ async function main() {
       minTrades: CONFIG.smartMoney.minTrades,
       customWallets: CONFIG.smartMoney.customWallets,
       minCopyValueUsd: CONFIG.smartMoney.minCopyValueUsd,
+      largeSellThresholdUsd: CONFIG.smartMoney.largeSellThresholdUsd,
     },
     arbitrage: {
       enabled: CONFIG.arbitrage.enabled,
@@ -1553,6 +1531,10 @@ async function main() {
     takeProfit: {
       enabled: (CONFIG as any).takeProfitEnabled ?? true,
       targetPct: (CONFIG as any).takeProfitPct ?? 20,
+    },
+    stopLoss: {
+      enabled: runtimeConfig.stopLoss?.enabled ?? true,
+      targetPct: runtimeConfig.stopLoss?.targetPct ?? CONFIG.smartMoney.stopLossPct,
     },
     botPaused: runtimeConfig.botPaused,
   });
@@ -1986,6 +1968,20 @@ async function main() {
         log('INFO', `Take-profit ${value.enabled ? `enabled at ${value.pct}%` : 'disabled'}`);
         const current = loadRuntimeConfig();
         saveRuntimeConfig({ ...current, takeProfit: { enabled: value.enabled, targetPct: value.pct, applyToStrategies: ['smartMoney'] } });
+      }
+
+      if (key === 'stopLoss') {
+        CONFIG.smartMoney.stopLossPct = value.pct;
+        log('INFO', `Stop-loss ${value.enabled ? `enabled at ${value.pct}%` : 'disabled'}`);
+        const current = loadRuntimeConfig();
+        saveRuntimeConfig({ ...current, stopLoss: { enabled: value.enabled, targetPct: value.pct } });
+      }
+
+      if (key === 'largeSellThreshold' && typeof value === 'number' && value >= 0) {
+        CONFIG.smartMoney.largeSellThresholdUsd = value;
+        log('INFO', `Large-sell panic threshold updated: $${value.toLocaleString()}`);
+        const current = loadRuntimeConfig();
+        saveRuntimeConfig({ ...current, largeSellThresholdUsd: value });
       }
 
       if (key === 'botPaused' && value === false) {

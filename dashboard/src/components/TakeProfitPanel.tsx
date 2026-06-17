@@ -9,11 +9,16 @@ interface TakeProfitPanelProps {
 export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps) {
   const [targetPct, setTargetPct] = useState<number>(config?.takeProfit?.targetPct ?? 20);
   const [enabled, setEnabled] = useState<boolean>(config?.takeProfit?.enabled ?? true);
+  const [slEnabled, setSlEnabled] = useState<boolean>(config?.stopLoss?.enabled ?? true);
+  const [slPct, setSlPct] = useState<number>(config?.stopLoss?.targetPct ?? 30);
   const [tradeSize, setTradeSize] = useState<number>(
     Math.round((config?.capital?.maxPerTradePct ?? 0.02) * 100)
   );
   const [minCopyValue, setMinCopyValue] = useState<string>(
     String(config?.smartMoney?.minCopyValueUsd ?? 1000)
+  );
+  const [largeSellThreshold, setLargeSellThreshold] = useState<string>(
+    String(config?.smartMoney?.largeSellThresholdUsd ?? 5000)
   );
   const botPaused = config?.botPaused ?? false;
   const capital = config?.capital?.totalUsd ?? 1000;
@@ -30,6 +35,18 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
     onUpdateConfig('takeProfit', { enabled, pct });
   };
 
+  const handleSlToggle = () => {
+    const newEnabled = !slEnabled;
+    setSlEnabled(newEnabled);
+    onUpdateConfig('stopLoss', { enabled: newEnabled, pct: slPct });
+  };
+
+  const handleSlSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const pct = parseInt(e.target.value);
+    setSlPct(pct);
+    onUpdateConfig('stopLoss', { enabled: slEnabled, pct });
+  };
+
   const handleTradeSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const pct = parseFloat(e.target.value);
     setTradeSize(pct);
@@ -42,6 +59,15 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
       onUpdateConfig('minCopyValue', val);
     } else {
       setMinCopyValue(String(config?.smartMoney?.minCopyValueUsd ?? 1000));
+    }
+  };
+
+  const handleLargeSellCommit = () => {
+    const val = parseFloat(largeSellThreshold);
+    if (!isNaN(val) && val >= 0) {
+      onUpdateConfig('largeSellThreshold', val);
+    } else {
+      setLargeSellThreshold(String(config?.smartMoney?.largeSellThresholdUsd ?? 5000));
     }
   };
 
@@ -85,7 +111,7 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-gray-400 text-sm">Min copy value</span>
-            <span className="text-xs text-gray-600">Only copy trades ≥ this</span>
+            <span className="text-xs text-gray-600">Copy trades ≥ this</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-gray-500 text-sm font-mono">$</span>
@@ -102,6 +128,29 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
             />
           </div>
           <div className="text-xs text-gray-600 mt-1">Press Enter or click away to apply</div>
+        </div>
+
+        {/* Large Sell Panic Threshold */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-gray-400 text-sm">Panic sell threshold</span>
+            <span className="text-xs text-gray-600">Any SELL ≥ this exits us</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500 text-sm font-mono">$</span>
+            <input
+              type="number"
+              min="0"
+              step="500"
+              value={largeSellThreshold}
+              onChange={(e) => setLargeSellThreshold(e.target.value)}
+              onBlur={handleLargeSellCommit}
+              onKeyDown={(e) => e.key === 'Enter' && handleLargeSellCommit()}
+              className="flex-1 bg-poly-dark border border-white/10 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:outline-none focus:border-orange-500/50"
+              placeholder="5000"
+            />
+          </div>
+          <div className="text-xs text-gray-600 mt-1">Closes position if a whale dumps this much on our market</div>
         </div>
 
         {/* Trade Size Slider */}
@@ -130,11 +179,19 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
 
         {/* Take Profit Slider */}
         <div className="border-t border-white/5 pt-3">
-          <div className={enabled ? '' : 'opacity-40 pointer-events-none'}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-gray-400 text-sm">Take profit target</span>
-              <span className="text-white font-mono font-medium">+{targetPct}%</span>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-gray-400 text-sm">Take profit</span>
+            <div className="flex items-center gap-2">
+              <span className={`font-mono font-medium ${enabled ? 'text-green-400' : 'text-gray-500'}`}>+{targetPct}%</span>
+              <button
+                onClick={handleToggle}
+                className={`relative w-8 h-4 rounded-full transition-all duration-200 ${enabled ? 'bg-green-500' : 'bg-gray-700'}`}
+              >
+                <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform duration-200 ${enabled ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
             </div>
+          </div>
+          <div className={enabled ? '' : 'opacity-40 pointer-events-none'}>
             <input
               type="range"
               min="5"
@@ -152,8 +209,40 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
           </div>
         </div>
 
+        {/* Stop Loss Slider */}
+        <div className="border-t border-white/5 pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-gray-400 text-sm">Stop loss</span>
+            <div className="flex items-center gap-2">
+              <span className={`font-mono font-medium ${slEnabled ? 'text-red-400' : 'text-gray-500'}`}>-{slPct}%</span>
+              <button
+                onClick={handleSlToggle}
+                className={`relative w-8 h-4 rounded-full transition-all duration-200 ${slEnabled ? 'bg-red-500' : 'bg-gray-700'}`}
+              >
+                <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform duration-200 ${slEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+            </div>
+          </div>
+          <div className={slEnabled ? '' : 'opacity-40 pointer-events-none'}>
+            <input
+              type="range"
+              min="5"
+              max="80"
+              step="5"
+              value={slPct}
+              onChange={handleSlSliderChange}
+              className="w-full accent-red-500"
+            />
+            <div className="flex justify-between text-xs text-gray-600 mt-1">
+              <span>5%</span>
+              <span>40%</span>
+              <span>80%</span>
+            </div>
+          </div>
+        </div>
+
         <div className="text-xs text-gray-600">
-          Take profit applies to Smart Money only.
+          TP/SL checked every 5 min via market price polling.
         </div>
       </div>
     </div>

@@ -48,11 +48,11 @@ export function SmartMoneyPanel({ state, onCommand }: SmartMoneyPanelProps) {
       <div className="panel-header">
         <h2 className="section-header mb-0">
           <div className="section-header-icon bg-gradient-to-br from-pink-500/20 to-purple-500/20">
-            👛
+            🐋
           </div>
           <div className="flex flex-col">
             <span className="text-[10px] text-purple-400 uppercase tracking-wider font-medium">Strategy 1</span>
-            <span>Smart Money Tracker</span>
+            <span>Large Trade Copier</span>
           </div>
         </h2>
         <div className="flex items-center gap-2">
@@ -69,8 +69,8 @@ export function SmartMoneyPanel({ state, onCommand }: SmartMoneyPanelProps) {
         {/* Stats Row */}
         <div className="grid grid-cols-3 gap-4 mb-5">
           <div className="bg-poly-dark/50 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold font-mono text-purple-400">{followedWallets.length}</div>
-            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Tracking</div>
+            <div className="text-2xl font-bold font-mono text-orange-400">ALL</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Feed scope</div>
           </div>
           <div className="bg-poly-dark/50 rounded-xl p-4 text-center">
             <div className="text-2xl font-bold font-mono text-blue-400">{signals.length}</div>
@@ -84,7 +84,7 @@ export function SmartMoneyPanel({ state, onCommand }: SmartMoneyPanelProps) {
 
         {/* Recent Signals */}
         <div className="text-xs text-gray-500 uppercase tracking-wider mb-3 flex items-center justify-between">
-          <span>Recent Whale Activity</span>
+          <span>Recent Large Trades</span>
           <span className="text-gray-600">{signals.length} signals</span>
         </div>
 
@@ -92,8 +92,8 @@ export function SmartMoneyPanel({ state, onCommand }: SmartMoneyPanelProps) {
           {signals.length === 0 ? (
             <div className="bg-poly-dark/30 rounded-xl p-8 text-center">
               <div className="text-4xl mb-3">🐋</div>
-              <div className="text-gray-400">Monitoring whale wallets...</div>
-              <div className="text-xs text-gray-500 mt-1">Signals appear when tracked wallets trade</div>
+              <div className="text-gray-400">Watching all trades...</div>
+              <div className="text-xs text-gray-500 mt-1">Signals appear when any large trade is detected</div>
             </div>
           ) : (
             signals.slice(0, 10).map((signal) => (
@@ -137,10 +137,10 @@ export function SmartMoneyPanel({ state, onCommand }: SmartMoneyPanelProps) {
           )}
         </div>
 
-        {/* Tracked Wallets */}
+        {/* Custom Wallets */}
         <div className="divider" />
         <div className="text-xs text-gray-500 uppercase tracking-wider mb-3">
-          Tracked Wallets
+          Custom Exit-Signal Wallets
         </div>
 
         {followedWallets.length > 0 ? (
@@ -162,7 +162,7 @@ export function SmartMoneyPanel({ state, onCommand }: SmartMoneyPanelProps) {
           </div>
         ) : (
           <div className="text-xs text-gray-600 mb-4 text-center py-3">
-            No wallets followed yet — auto-detection running
+            No custom wallets — exits triggered by TP/SL and panic sells
           </div>
         )}
 
