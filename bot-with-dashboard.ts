@@ -554,7 +554,8 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
   }
 
   state.followedWallets = qualified;
-  log('WALLET', `Following ${qualified.length} wallets`);
+  log('WALLET', `Following ${qualified.length} wallets:`);
+  for (const w of qualified) log('WALLET', `  → ${w}`);
   updateDashboard();
 
   if (qualified.length > 0) {
@@ -596,13 +597,17 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
           if (!isFollowedWallet) {
             if (state.followedWallets.length === 0) {
               log('WARN', `[WalletFilter] BUY dropped — followed wallet list is still empty (leaderboard still loading?)`);
-            } else {
-              log('SIGNAL', `[WalletFilter] BUY from ${traderLower.slice(0, 10)}... not in followed list (${state.followedWallets.length} wallets: ${state.followedWallets.slice(0, 2).map(w => w.slice(0, 10)).join(', ')}...)`);
             }
+            // Don't log every miss — would spam the log with all global Polymarket activity
             return;
           }
+          // Followed wallet trade received — log it so we can confirm the filter is working
+          log('SIGNAL', `[FollowedWallet] ${traderLower.slice(0, 10)}... ${trade.side} $${tradeValueUsd.toFixed(0)} @ ${trade.price.toFixed(3)} on ${trade.marketSlug}`);
           if (!canTrade()) return;
-          if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) return;
+          if (tradeValueUsd < CONFIG.smartMoney.minCopyValueUsd) {
+            log('SIGNAL', `[WalletFilter] Skipping — $${tradeValueUsd.toFixed(0)} below min copy amount $${CONFIG.smartMoney.minCopyValueUsd}`);
+            return;
+          }
           if (trade.price < 0.05) {
             log('SIGNAL', `Skipping longshot: ${trade.side} @ ${trade.price.toFixed(3)} (< 5% probability)`);
             return;
