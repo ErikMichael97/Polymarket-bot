@@ -34,64 +34,51 @@ export function SessionSummary({ state, dryRun }: SessionSummaryProps) {
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="text-center">
             <div className="text-3xl font-bold font-mono text-green-400 glow-text-green">
-              {dryRun ? '—' : wins}
+              {wins}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Wins</div>
           </div>
           <div className="text-center">
             <div className="text-3xl font-bold font-mono text-red-400">
-              {dryRun ? '—' : losses}
+              {losses}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Losses</div>
           </div>
           <div className="text-center">
-            <div className={`text-3xl font-bold font-mono ${dryRun ? 'text-gray-500' : winRate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
-              {dryRun ? '—' : `${winRate.toFixed(0)}%`}
+            <div className={`text-3xl font-bold font-mono ${winRate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
+              {(wins + losses) > 0 ? `${winRate.toFixed(0)}%` : '—'}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Win Rate</div>
           </div>
           <div className="text-center">
             <div className={`text-3xl font-bold font-mono ${avgProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {dryRun ? '—' : `$${avgProfit.toFixed(2)}`}
+              {(wins + losses) > 0 ? `$${avgProfit.toFixed(2)}` : '—'}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Avg/Trade</div>
           </div>
         </div>
 
-        {dryRun ? (
-          <div className="mb-6">
-            <div className="flex justify-between text-xs text-gray-500 mb-2">
-              <span>Positions</span>
-              <span>{trades} copied — pending market resolution</span>
-            </div>
-            <div className="h-3 rounded-full bg-gray-800 overflow-hidden">
-              <div
-                className="h-full bg-blue-500/40 transition-all duration-500"
-                style={{ width: trades > 0 ? `${Math.min(100, (pending / Math.max(1, trades)) * 100)}%` : '0%' }}
-              />
-            </div>
+        <div className="mb-6">
+          <div className="flex justify-between text-xs text-gray-500 mb-2">
+            <span>Win Rate Distribution</span>
+            <span>{wins}W — {losses}L — {pending} pending</span>
+          </div>
+          <div className="h-3 rounded-full bg-gray-800 overflow-hidden flex">
+            <div
+              className="h-full progress-gradient-green transition-all duration-500"
+              style={{ width: `${(wins + losses) > 0 ? winRate : 0}%` }}
+            />
+            <div
+              className="h-full progress-gradient-red transition-all duration-500"
+              style={{ width: `${(wins + losses) > 0 ? (100 - winRate) : 0}%` }}
+            />
+          </div>
+          {dryRun && pending > 0 && (
             <div className="text-xs text-gray-600 mt-1 text-center">
-              Win/loss tracked on market resolution (live mode only)
+              {pending} position{pending !== 1 ? 's' : ''} pending market resolution
             </div>
-          </div>
-        ) : (
-          <div className="mb-6">
-            <div className="flex justify-between text-xs text-gray-500 mb-2">
-              <span>Win Rate Distribution</span>
-              <span>{wins}W - {losses}L</span>
-            </div>
-            <div className="h-3 rounded-full bg-gray-800 overflow-hidden flex">
-              <div
-                className="h-full progress-gradient-green transition-all duration-500"
-                style={{ width: `${winRate}%` }}
-              />
-              <div
-                className="h-full progress-gradient-red transition-all duration-500"
-                style={{ width: `${100 - winRate}%` }}
-              />
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="divider" />
 

@@ -455,12 +455,16 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
     sdk.smartMoney.subscribeSmartMoneyTrades(
       async (trade: SmartMoneyTrade) => {
         if (!CONFIG.smartMoney.enabled) return;
-        if (!canTrade()) return;
 
         // Deduplicate order slices — top wallets split one position into many fills
         if (isOrderSlice(trade.traderAddress, trade.marketSlug || trade.conditionId || 'unknown')) {
           return;
         }
+
+        // SELL signals always process (close existing positions and return capital to balance)
+        // canTrade() only gates new BUY entries
+        const isSell = trade.side === 'SELL';
+        if (!isSell && !canTrade()) return;
 
         const tradeValueUsd = trade.size * trade.price;
 
@@ -494,7 +498,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
         if (CONFIG.dryRun) {
           if (!state.paperPositions) state.paperPositions = [];
 
-          // --- SELL: close an existing paper position ---
+          // --- SELL: always process regardless of balance (closes position and returns capital) ---
           if (trade.side === 'SELL') {
             const condId = (trade as any).conditionId as string | undefined;
             const matchIdx = state.paperPositions.findIndex(
@@ -537,7 +541,8 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
             }
             sizePct = Math.max(CONFIG.risk.minPositionPct, Math.min(CONFIG.risk.maxPositionPct, sizePct));
           }
-          const ourCost = sizePct * CONFIG.capital.totalUsd;
+          const currentCapital = CONFIG.capital.totalUsd + state.totalPnL;
+          const ourCost = sizePct * currentCapital;
 
           state.paper.balance = Math.max(0, state.paper.balance - ourCost);
 
@@ -606,7 +611,8 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
             }
             sizePct = Math.max(CONFIG.risk.minPositionPct, Math.min(CONFIG.risk.maxPositionPct, sizePct));
           }
-          const ourCost = sizePct * CONFIG.capital.totalUsd;
+          const currentCapital = CONFIG.capital.totalUsd + state.totalPnL;
+          const ourCost = sizePct * currentCapital;
 
           const tokenId = (trade as any).tokenId as string | undefined;
           if (!tokenId) {
