@@ -515,7 +515,7 @@ async function initializeSmartMoney(sdk: PolymarketSDK) {
               const profit = (exitPrice - pos.entryPrice) * shares;
 
               pos.resolved = true;
-              pos.outcome = profit >= 0 ? 'WIN' : 'LOSS';
+              pos.outcome = profit > 0 ? 'WIN' : 'LOSS';
               pos.finalProfit = profit;
               pos.resolvedAt = new Date().toISOString();
 
@@ -1166,6 +1166,64 @@ async function checkPaperPositionOutcomes(sdk: PolymarketSDK) {
   updateDashboard();
 }
 
+// Checks open paper positions against the take-profit target every 5 minutes.
+// Fetches the current market price and closes positions that have hit the target return.
+async function checkTakeProfitTargets(sdk: PolymarketSDK) {
+  const rtConfig = loadRuntimeConfig();
+  if (!rtConfig.takeProfit.enabled) return;
+  if (!state.paperPositions || state.paperPositions.length === 0) return;
+
+  const targetPct = rtConfig.takeProfit.targetPct;
+  const openPositions = state.paperPositions.filter(
+    p => !p.resolved && p.conditionId && rtConfig.takeProfit.applyToStrategies.includes('smartMoney')
+  );
+  if (openPositions.length === 0) return;
+
+  for (const pos of openPositions) {
+    try {
+      const market = await sdk.markets.getMarket(pos.conditionId!);
+      if (!market || market.closed) continue;
+
+      // Find current price of the token we hold
+      let currentPrice: number | null = null;
+      if (pos.tokenId) {
+        const token = market.tokens.find((t: any) => t.tokenId === pos.tokenId);
+        currentPrice = token?.price ?? null;
+      } else {
+        // Fallback: use the YES token price if entry was > 0.5, NO token otherwise
+        const yesToken = market.tokens.find((t: any) => t.outcome?.toLowerCase() === 'yes');
+        const noToken = market.tokens.find((t: any) => t.outcome?.toLowerCase() === 'no');
+        currentPrice = pos.entryPrice >= 0.5
+          ? (yesToken?.price ?? null)
+          : (noToken?.price ?? null);
+      }
+
+      if (currentPrice === null || currentPrice <= 0) continue;
+
+      const returnPct = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
+      if (returnPct < targetPct) continue;
+
+      // Hit take-profit — close the position
+      const shares = pos.ourCost / pos.entryPrice;
+      const profit = (currentPrice - pos.entryPrice) * shares;
+
+      pos.resolved = true;
+      pos.outcome = 'WIN';
+      pos.finalProfit = profit;
+      pos.resolvedAt = new Date().toISOString();
+
+      state.paper!.balance += pos.ourCost + profit;
+      state.paper!.pnl += profit;
+      recordTrade(profit, 'smartMoney');
+
+      log('TRADE', `[TAKE PROFIT] ✅ ${pos.market} | +${returnPct.toFixed(1)}% hit target ${targetPct}% | +$${profit.toFixed(2)}`);
+    } catch {
+      // Market fetch failed — skip, retry next interval
+    }
+  }
+  updateDashboard();
+}
+
 // Tracks live position conditionIds we've already recorded as resolved,
 // so we don't double-count across 30-second syncs.
 const resolvedLivePositions = new Set<string>();
@@ -1251,8 +1309,11 @@ async function setupPortfolioManager(sdk: PolymarketSDK) {
     }
   }, 30 * 1000);
 
-  // Poll paper position outcomes every 5 minutes (markets don't resolve instantly)
-  setInterval(() => checkPaperPositionOutcomes(sdk).catch(() => {}), 5 * 60 * 1000);
+  // Poll paper position outcomes and take-profit targets every 5 minutes
+  setInterval(() => {
+    checkPaperPositionOutcomes(sdk).catch(() => {});
+    checkTakeProfitTargets(sdk).catch(() => {});
+  }, 5 * 60 * 1000);
 }
 
 async function main() {
