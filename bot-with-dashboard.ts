@@ -34,7 +34,7 @@ import { saveState, loadPersistedState, type PersistedState } from './src/state-
 
 let CONFIG = {
   capital: {
-    totalUsd: parseFloat(process.env.CAPITAL_USD || '250'),
+    totalUsd: parseFloat(process.env.CAPITAL_USD || '1000'),
     maxPerTradePct: 0.02,  // 🔴 FIXED: Reduced from 3% to 2%
     maxPerMarketPct: 0.10,
     maxTotalExposurePct: 0.30,
@@ -80,7 +80,7 @@ let CONFIG = {
     maxSingleTradeExposure: 0.3,  // Max 30% of PnL from one trade
     checkLastNTrades: 10,  // Analyze last 10 trades
 
-    minCopyValueUsd: parseFloat(process.env.MIN_COPY_VALUE_USD || '1000'),
+    minCopyValueUsd: parseFloat(process.env.MIN_COPY_VALUE_USD || '10000'),
     stopLossPct: 30,
     largeSellThresholdUsd: 5000,
 
@@ -339,6 +339,16 @@ function canTrade(): boolean {
   // Check if permanently halted
   if (state.permanentlyHalted) {
     log('ERROR', '🛑 Trading permanently halted - total loss limit reached');
+    return false;
+  }
+
+  // Paper trading: halt if balance is fully depleted
+  if (state.paper && state.paper.balance <= 0 && (state.paper.trades ?? 0) > 0) {
+    if (!state.permanentlyHalted) {
+      state.permanentlyHalted = true;
+      log('ERROR', '💀 Paper balance depleted — trading halted. Reset bot data to restart.');
+      updateDashboard();
+    }
     return false;
   }
 

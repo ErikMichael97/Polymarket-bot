@@ -15,7 +15,7 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
     Math.round((config?.capital?.maxPerTradePct ?? 0.02) * 100)
   );
   const [minCopyValue, setMinCopyValue] = useState<string>(
-    String(config?.smartMoney?.minCopyValueUsd ?? 1000)
+    String(config?.smartMoney?.minCopyValueUsd ?? 10000)
   );
   const [largeSellThreshold, setLargeSellThreshold] = useState<string>(
     String(config?.smartMoney?.largeSellThresholdUsd ?? 5000)
@@ -58,7 +58,7 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
     if (!isNaN(val) && val >= 0) {
       onUpdateConfig('minCopyValue', val);
     } else {
-      setMinCopyValue(String(config?.smartMoney?.minCopyValueUsd ?? 1000));
+      setMinCopyValue(String(config?.smartMoney?.minCopyValueUsd ?? 10000));
     }
   };
 
@@ -124,7 +124,7 @@ export function TakeProfitPanel({ config, onUpdateConfig }: TakeProfitPanelProps
               onBlur={handleMinCopyValueCommit}
               onKeyDown={(e) => e.key === 'Enter' && handleMinCopyValueCommit()}
               className="flex-1 bg-poly-dark border border-white/10 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:outline-none focus:border-blue-500/50"
-              placeholder="1000"
+              placeholder="10000"
             />
           </div>
           <div className="text-xs text-gray-600 mt-1">Press Enter or click away to apply</div>
